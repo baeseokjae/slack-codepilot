@@ -10,6 +10,7 @@ vi.mock('../lib/metrics.js', () => ({
 vi.mock('../config/index.js', () => ({
   config: {
     LOG_LEVEL: 'silent',
+    AI_PROVIDER: 'openai',
     QWEN_API_KEY: 'test-key',
     QWEN_API_BASE_URL: 'https://test.example.com',
     QWEN_MODEL: 'test-model',

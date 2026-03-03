@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../config/index.js', () => ({
   config: {
     LOG_LEVEL: 'silent',
+    AI_PROVIDER: 'openai',
     REDIS_URL: 'redis://localhost:6379',
     QWEN_API_KEY: 'test',
     QWEN_API_BASE_URL: 'http://test',

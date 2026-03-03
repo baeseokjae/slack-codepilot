@@ -7,10 +7,28 @@ import { RateLimiter } from '../lib/rate-limiter.js';
 
 const logger = createLogger('ai-service');
 
-const client = new OpenAI({
-  apiKey: config.QWEN_API_KEY,
-  baseURL: config.QWEN_API_BASE_URL,
-});
+let openaiClient: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+  if (!openaiClient) {
+    openaiClient = new OpenAI({
+      apiKey: config.QWEN_API_KEY,
+      baseURL: config.QWEN_API_BASE_URL,
+    });
+  }
+  return openaiClient;
+}
+
+async function createVertexClient(): Promise<OpenAI> {
+  const { getAccessToken } = await import('./vertex-auth.js');
+  const token = await getAccessToken();
+  const baseURL = `https://${config.VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${config.VERTEX_PROJECT_ID}/locations/${config.VERTEX_LOCATION}/endpoints/openapi`;
+  return new OpenAI({ apiKey: token, baseURL });
+}
+
+function getModel(): string {
+  return config.AI_PROVIDER === 'vertex' ? config.VERTEX_MODEL : config.QWEN_MODEL;
+}
 
 const aiCircuitBreaker = new CircuitBreaker({
   name: 'ai',
@@ -41,8 +59,11 @@ export async function chatCompletion(
   try {
     const content = await aiRateLimiter.execute(() =>
       aiCircuitBreaker.execute(async () => {
+        const client =
+          config.AI_PROVIDER === 'vertex' ? await createVertexClient() : getOpenAIClient();
+
         const response = await client.chat.completions.create({
-          model: config.QWEN_MODEL,
+          model: getModel(),
           messages,
           temperature: options?.temperature ?? 0.1,
           max_tokens: options?.maxTokens ?? 2048,
