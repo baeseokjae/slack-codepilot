@@ -1,4 +1,5 @@
-import { App, ExpressReceiver } from '@slack/bolt';
+import pkg from '@slack/bolt';
+const { App, ExpressReceiver } = pkg;
 import { config } from './config/index.js';
 import type { HealthStatus } from './lib/health.js';
 import { checkBullMQHealth, checkRedisHealth, deriveOverallStatus } from './lib/health.js';

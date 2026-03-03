@@ -18,7 +18,7 @@ const envSchema = z
     VERTEX_LOCATION: z.string().default('us-central1'),
     VERTEX_MODEL: z.string().default('google/gemini-2.5-flash'),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
-    PORT: z.coerce.number().default(3000),
+    PORT: z.coerce.number().default(4000),
     GITHUB_APP_ID: z.coerce.number().optional(),
     GITHUB_PRIVATE_KEY: z.string().optional(),
     GITHUB_INSTALLATION_ID: z.coerce.number().optional(),

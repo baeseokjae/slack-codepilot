@@ -22,7 +22,7 @@ function getOpenAIClient(): OpenAI {
 async function createVertexClient(): Promise<OpenAI> {
   const { getAccessToken } = await import('./vertex-auth.js');
   const token = await getAccessToken();
-  const baseURL = `https://${config.VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/${config.VERTEX_PROJECT_ID}/locations/${config.VERTEX_LOCATION}/endpoints/openapi`;
+  const baseURL = `https://aiplatform.googleapis.com/v1/projects/${config.VERTEX_PROJECT_ID}/locations/${config.VERTEX_LOCATION}/endpoints/openapi`;
   return new OpenAI({ apiKey: token, baseURL });
 }
 

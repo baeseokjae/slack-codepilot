@@ -68,7 +68,7 @@ describe('ai.service (vertex mode)', () => {
     expect(OpenAIMock).toHaveBeenCalledWith({
       apiKey: 'fake-gcp-token',
       baseURL:
-        'https://us-central1-aiplatform.googleapis.com/v1/projects/my-gcp-project/locations/us-central1/endpoints/openapi',
+        'https://aiplatform.googleapis.com/v1/projects/my-gcp-project/locations/us-central1/endpoints/openapi',
     });
   });
 

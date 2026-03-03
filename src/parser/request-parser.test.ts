@@ -64,16 +64,20 @@ describe('parseRequest', () => {
     expect(result.type).toBe('feature');
   });
 
-  it('should throw on invalid JSON from AI', async () => {
+  it('should return low-confidence fallback on invalid JSON from AI', async () => {
     mockChatCompletion.mockResolvedValue('this is not json at all');
 
-    await expect(parseRequest('뭔가 해줘')).rejects.toThrow('AI returned invalid JSON');
+    const result = await parseRequest('뭔가 해줘');
+    expect(result.confidence).toBe(0.3);
+    expect(result.missingInfo).toBeTruthy();
   });
 
-  it('should throw on valid JSON but invalid schema', async () => {
+  it('should return low-confidence fallback on valid JSON but invalid schema', async () => {
     mockChatCompletion.mockResolvedValue(JSON.stringify({ type: 'unknown', title: 'test' }));
 
-    await expect(parseRequest('뭔가 해줘')).rejects.toThrow('Invalid AI response schema');
+    const result = await parseRequest('뭔가 해줘');
+    expect(result.confidence).toBe(0.3);
+    expect(result.missingInfo).toBeTruthy();
   });
 
   it('should include conversation history in messages', async () => {
