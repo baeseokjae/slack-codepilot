@@ -1,12 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import pino from 'pino';
 import { simpleGit } from 'simple-git';
 import { config } from '../../config/index.js';
+import { createLogger } from '../../lib/logger.js';
 import { getAuthenticatedCloneUrl } from '../../services/github.service.js';
 import type { PipelineContext } from '../types.js';
 
-const logger = pino({ name: 'step:clone-repo', level: config.LOG_LEVEL });
+const logger = createLogger('step:clone-repo');
 
 export function generateBranchName(type: string, title: string): string {
   const slug = title

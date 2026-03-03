@@ -1,11 +1,12 @@
 import { createAppAuth } from '@octokit/auth-app';
 import { Octokit } from '@octokit/rest';
-import pino from 'pino';
 import { config } from '../config/index.js';
 import { CircuitBreaker } from '../lib/circuit-breaker.js';
+import { createLogger } from '../lib/logger.js';
+import { githubRequestDuration, githubRequestsTotal } from '../lib/metrics.js';
 import type { RepoInfo } from '../types/index.js';
 
-const logger = pino({ name: 'github-service', level: config.LOG_LEVEL });
+const logger = createLogger('github-service');
 
 const githubCircuitBreaker = new CircuitBreaker({
   name: 'github',
@@ -20,6 +21,19 @@ function decodePrivateKey(key: string): string {
     return key;
   }
   return Buffer.from(key, 'base64').toString('utf-8');
+}
+
+async function withGithubMetrics<T>(fn: () => Promise<T>): Promise<T> {
+  const startTime = Date.now();
+  let success = false;
+  try {
+    const result = await githubCircuitBreaker.execute(fn);
+    success = true;
+    return result;
+  } finally {
+    githubRequestDuration.observe((Date.now() - startTime) / 1000);
+    githubRequestsTotal.inc({ status: success ? 'success' : 'error' });
+  }
 }
 
 export function validateGitHubConfig(): void {
@@ -60,7 +74,7 @@ export async function resolveRepo(repoFullName: string): Promise<RepoInfo> {
 
   const [owner, repo] = parts;
 
-  return githubCircuitBreaker.execute(async () => {
+  return withGithubMetrics(async () => {
     const kit = getOctokit();
     const { data } = await kit.repos.get({ owner, repo });
     logger.info({ owner, repo, defaultBranch: data.default_branch }, 'Resolved repository');
@@ -80,7 +94,7 @@ export async function createIssue(params: {
   body: string;
   labels?: string[];
 }): Promise<{ number: number; url: string }> {
-  return githubCircuitBreaker.execute(async () => {
+  return withGithubMetrics(async () => {
     const kit = getOctokit();
     const { data } = await kit.issues.create({
       owner: params.owner,
@@ -102,7 +116,7 @@ export async function createPullRequest(params: {
   head: string;
   base: string;
 }): Promise<{ number: number; url: string }> {
-  return githubCircuitBreaker.execute(async () => {
+  return withGithubMetrics(async () => {
     const kit = getOctokit();
     const { data } = await kit.pulls.create({
       owner: params.owner,
@@ -122,7 +136,7 @@ export async function findExistingIssue(params: {
   repo: string;
   title: string;
 }): Promise<{ number: number; url: string } | null> {
-  return githubCircuitBreaker.execute(async () => {
+  return withGithubMetrics(async () => {
     const kit = getOctokit();
     const { data } = await kit.issues.listForRepo({
       owner: params.owner,
@@ -144,7 +158,7 @@ export async function findExistingPR(params: {
   repo: string;
   head: string;
 }): Promise<{ number: number; url: string } | null> {
-  return githubCircuitBreaker.execute(async () => {
+  return withGithubMetrics(async () => {
     const kit = getOctokit();
     const { data } = await kit.pulls.list({
       owner: params.owner,
@@ -161,7 +175,7 @@ export async function findExistingPR(params: {
 }
 
 export async function getAuthenticatedCloneUrl(owner: string, repo: string): Promise<string> {
-  return githubCircuitBreaker.execute(async () => {
+  return withGithubMetrics(async () => {
     const kit = getOctokit();
     const auth = (await kit.auth({ type: 'installation' })) as { token: string };
     return `https://x-access-token:${auth.token}@github.com/${owner}/${repo}.git`;

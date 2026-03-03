@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 import { UnrecoverableError, Worker } from 'bullmq';
-import pino from 'pino';
 import { config } from './config/index.js';
+import { createLogger } from './lib/logger.js';
 import { runPipeline } from './pipeline/orchestrator.js';
 import { validateGitHubConfig } from './services/github.service.js';
 import type { TaskJobData } from './services/queue.service.js';
 import { closeRedis } from './services/state.service.js';
 
-const logger = pino({ name: 'worker', level: config.LOG_LEVEL });
+const logger = createLogger('worker');
 
 const QUEUE_NAME = 'codepilot-tasks';
 

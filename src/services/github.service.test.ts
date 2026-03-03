@@ -1,5 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../lib/metrics.js', () => ({
+  githubRequestDuration: { observe: vi.fn() },
+  githubRequestsTotal: { inc: vi.fn() },
+}));
+
+vi.mock('../lib/circuit-breaker.js', () => ({
+  CircuitBreaker: vi.fn().mockImplementation(() => ({
+    execute: vi.fn().mockImplementation((fn: () => Promise<unknown>) => fn()),
+  })),
+}));
+
 vi.mock('../config/index.js', () => ({
   config: {
     LOG_LEVEL: 'silent',

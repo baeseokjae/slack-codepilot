@@ -1,11 +1,10 @@
-import pino from 'pino';
-import { config } from '../config/index.js';
+import { createLogger } from '../lib/logger.js';
 import { REQUEST_PARSING_SYSTEM_PROMPT } from '../prompts/request-parsing.js';
 import { type ChatMessage, chatCompletion } from '../services/ai.service.js';
 import type { ConversationMessage, ParsedRequest } from '../types/index.js';
 import { parsedRequestSchema } from './schemas.js';
 
-const logger = pino({ name: 'request-parser', level: config.LOG_LEVEL });
+const logger = createLogger('request-parser');
 
 export async function parseRequest(
   text: string,

@@ -2,6 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockCreate = vi.hoisted(() => vi.fn());
 
+vi.mock('../lib/metrics.js', () => ({
+  aiRequestDuration: { observe: vi.fn() },
+  aiRequestsTotal: { inc: vi.fn() },
+}));
+
 vi.mock('../config/index.js', () => ({
   config: {
     LOG_LEVEL: 'silent',

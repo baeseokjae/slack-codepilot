@@ -1,8 +1,9 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { UnrecoverableError } from 'bullmq';
-import pino from 'pino';
-import { config } from '../config/index.js';
 import { sanitizeErrorObject } from '../lib/error-sanitizer.js';
+import { createLogger } from '../lib/logger.js';
+import { pipelineDuration, pipelineStepDuration, pipelineTotal } from '../lib/metrics.js';
 import type { TaskJobData } from '../services/queue.service.js';
 import { notify } from '../services/slack-notifier.service.js';
 import { getPipelineState, savePipelineState } from '../services/state.service.js';
@@ -20,8 +21,6 @@ import { createPRStep } from './steps/create-pr.js';
 import { generateCodeStep } from './steps/generate-code.js';
 import type { PipelineContext } from './types.js';
 
-const logger = pino({ name: 'orchestrator', level: config.LOG_LEVEL });
-
 const STEPS: { name: PipelineStep; handler: (ctx: PipelineContext) => Promise<void> }[] = [
   { name: 'create_issue', handler: createIssueStep },
   { name: 'clone_repo', handler: cloneRepoStep },
@@ -37,8 +36,12 @@ export async function runPipeline(jobId: string, data: TaskJobData): Promise<voi
     throw new UnrecoverableError('targetRepo is null — cannot proceed without a target repository');
   }
 
+  const correlationId = randomUUID();
+  const log = createLogger('orchestrator', correlationId);
+
   const ctx: PipelineContext = {
     jobId,
+    correlationId,
     channelId,
     threadTs,
     userId,
@@ -55,6 +58,9 @@ export async function runPipeline(jobId: string, data: TaskJobData): Promise<voi
     updatedAt: Date.now(),
   };
 
+  const stepTimings: Record<string, number> = {};
+  const pipelineStartTime = Date.now();
+
   await savePipelineState(state);
   await notify(channelId, threadTs, ':gear: 작업을 시작합니다...');
 
@@ -63,13 +69,14 @@ export async function runPipeline(jobId: string, data: TaskJobData): Promise<voi
       // Cooperative cancellation: check if pipeline was cancelled before each step
       const latestState = await getPipelineState(jobId);
       if (latestState?.status === 'cancelled') {
-        logger.info({ jobId }, 'Pipeline cancelled, stopping execution');
+        log.info({ jobId }, 'Pipeline cancelled, stopping execution');
         await notify(
           channelId,
           threadTs,
           '작업이 취소되었습니다.',
           buildPipelineCancelledBlocks(latestState),
         );
+        pipelineTotal.inc({ status: 'cancelled' });
         return; // finally block will run workspace cleanup
       }
 
@@ -85,8 +92,13 @@ export async function runPipeline(jobId: string, data: TaskJobData): Promise<voi
         buildPipelineProgressBlocks(state),
       );
 
-      logger.info({ jobId, step: step.name }, 'Executing pipeline step');
+      log.info({ jobId, step: step.name }, 'Executing pipeline step');
+      const stepStart = Date.now();
       await step.handler(ctx);
+      const stepDurationMs = Date.now() - stepStart;
+      stepTimings[step.name] = stepDurationMs;
+      pipelineStepDuration.observe({ step: step.name }, stepDurationMs / 1000);
+      log.info({ jobId, step: step.name, durationMs: stepDurationMs }, 'Pipeline step completed');
     }
 
     state.status = 'completed';
@@ -96,14 +108,24 @@ export async function runPipeline(jobId: string, data: TaskJobData): Promise<voi
     state.prNumber = ctx.prNumber;
     state.prUrl = ctx.prUrl;
     state.updatedAt = Date.now();
+    state.stepTimings = stepTimings;
     await savePipelineState(state);
+
+    const totalDurationMs = Date.now() - pipelineStartTime;
+    pipelineDuration.observe(totalDurationMs / 1000);
+    pipelineTotal.inc({ status: 'completed' });
 
     await notify(channelId, threadTs, '작업 완료!', buildPipelineCompletedBlocks(state));
   } catch (err) {
     state.status = 'failed';
     state.error = sanitizeErrorObject(err);
     state.updatedAt = Date.now();
+    state.stepTimings = stepTimings;
     await savePipelineState(state);
+
+    const totalDurationMs = Date.now() - pipelineStartTime;
+    pipelineDuration.observe(totalDurationMs / 1000);
+    pipelineTotal.inc({ status: 'failed' });
 
     await notify(
       channelId,
@@ -117,9 +139,9 @@ export async function runPipeline(jobId: string, data: TaskJobData): Promise<voi
     if (ctx.workspacePath) {
       try {
         await fs.rm(ctx.workspacePath, { recursive: true, force: true });
-        logger.info({ workspacePath: ctx.workspacePath }, 'Workspace cleaned up');
+        log.info({ workspacePath: ctx.workspacePath }, 'Workspace cleaned up');
       } catch (cleanupErr) {
-        logger.warn(
+        log.warn(
           { err: cleanupErr, workspacePath: ctx.workspacePath },
           'Failed to clean up workspace',
         );

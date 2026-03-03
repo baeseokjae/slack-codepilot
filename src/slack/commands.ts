@@ -1,14 +1,15 @@
 import type { App } from '@slack/bolt';
-import pino from 'pino';
-import { config } from '../config/index.js';
+import { createLogger } from '../lib/logger.js';
+import { slackEventsTotal } from '../lib/metrics.js';
 import { getPipelineState, listRecentPipelines } from '../services/state.service.js';
 import { buildRecentJobsBlocks, buildStatusBlocks } from './blocks.js';
 
-const logger = pino({ name: 'commands', level: config.LOG_LEVEL });
+const logger = createLogger('commands');
 
 export function registerCommandHandlers(app: App): void {
   app.command('/codepilot', async ({ command, ack, respond }) => {
     await ack();
+    slackEventsTotal.inc({ type: 'command' });
 
     const args = command.text.trim().split(/\s+/);
     const subcommand = args[0]?.toLowerCase() || 'help';

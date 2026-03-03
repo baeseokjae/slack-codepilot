@@ -1,6 +1,6 @@
 import type { App } from '@slack/bolt';
-import pino from 'pino';
-import { config } from '../config/index.js';
+import { createLogger } from '../lib/logger.js';
+import { slackEventsTotal } from '../lib/metrics.js';
 import {
   getPipelineState,
   getThreadContext,
@@ -10,10 +10,11 @@ import { buildRecentJobsBlocks, buildStatusBlocks } from './blocks.js';
 import { handleFollowUpReply, handleNewRequest } from './conversation.js';
 import { addReaction, sendThreadMessage } from './notifications.js';
 
-const logger = pino({ name: 'events', level: config.LOG_LEVEL });
+const logger = createLogger('events');
 
 export function registerEventHandlers(app: App): void {
   app.event('app_mention', async ({ event, context }) => {
+    slackEventsTotal.inc({ type: 'mention' });
     const { channel, ts, thread_ts, text, user } = event;
     const threadTs = thread_ts || ts;
     const botUserId = context.botUserId;

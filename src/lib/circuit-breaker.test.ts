@@ -1,4 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mockCircuitBreakerState = vi.hoisted(() => ({ set: vi.fn() }));
+
+vi.mock('./metrics.js', () => ({
+  circuitBreakerState: mockCircuitBreakerState,
+}));
+
 import { CircuitBreaker } from './circuit-breaker.js';
 
 const FAILURE_THRESHOLD = 3;
@@ -15,6 +22,7 @@ function makeBreaker(): CircuitBreaker {
 describe('CircuitBreaker', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -31,6 +39,7 @@ describe('CircuitBreaker', () => {
     expect(breaker.getState()).toBe('closed');
     expect(breaker.getFailureCount()).toBe(0);
     expect(fn).toHaveBeenCalledTimes(1);
+    expect(mockCircuitBreakerState.set).toHaveBeenCalledWith({ name: 'test' }, 0);
   });
 
   it('closed→open 전환: failureThreshold 횟수 연속 실패 후 state=open', async () => {
@@ -44,6 +53,7 @@ describe('CircuitBreaker', () => {
 
     expect(breaker.getState()).toBe('open');
     expect(breaker.getFailureCount()).toBe(FAILURE_THRESHOLD);
+    expect(mockCircuitBreakerState.set).toHaveBeenCalledWith({ name: 'test' }, 1);
   });
 
   it('open 상태에서 즉시 거부: fn 호출 없이 Circuit breaker is open 에러 throw', async () => {
@@ -99,6 +109,9 @@ describe('CircuitBreaker', () => {
     expect(result).toBe('recovered');
     expect(breaker.getState()).toBe('closed');
     expect(breaker.getFailureCount()).toBe(0);
+    // half-open (2) then closed (0)
+    expect(mockCircuitBreakerState.set).toHaveBeenCalledWith({ name: 'test' }, 2);
+    expect(mockCircuitBreakerState.set).toHaveBeenLastCalledWith({ name: 'test' }, 0);
   });
 
   it('half-open→open 재전환: half-open에서 실패 시 다시 state=open', async () => {
@@ -142,6 +155,7 @@ describe('CircuitBreaker', () => {
 
     expect(breaker.getState()).toBe('closed');
     expect(breaker.getFailureCount()).toBe(0);
+    expect(mockCircuitBreakerState.set).toHaveBeenLastCalledWith({ name: 'test' }, 0);
   });
 
   it('getState()/getFailureCount(): 올바른 값 반환', async () => {

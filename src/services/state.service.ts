@@ -1,10 +1,10 @@
 import { Redis } from 'ioredis';
-import pino from 'pino';
 import { config } from '../config/index.js';
+import { createLogger } from '../lib/logger.js';
 import type { TaskJobData } from '../services/queue.service.js';
 import type { PipelineState, ThreadContext } from '../types/index.js';
 
-const logger = pino({ name: 'state-service', level: config.LOG_LEVEL });
+const logger = createLogger('state-service');
 const THREAD_TTL = 3600; // 1 hour
 const PENDING_TTL = 1800; // 30 minutes
 

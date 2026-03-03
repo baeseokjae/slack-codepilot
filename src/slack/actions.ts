@@ -1,7 +1,7 @@
 import type { App, BlockAction, ButtonAction } from '@slack/bolt';
 import type { KnownBlock } from '@slack/types';
-import pino from 'pino';
-import { config } from '../config/index.js';
+import { createLogger } from '../lib/logger.js';
+import { slackEventsTotal } from '../lib/metrics.js';
 import { cancelJob, enqueueTask } from '../services/queue.service.js';
 import {
   deletePendingConfirmation,
@@ -11,12 +11,13 @@ import {
 } from '../services/state.service.js';
 import { buildPipelineCancelledBlocks } from './blocks.js';
 
-const logger = pino({ name: 'actions', level: config.LOG_LEVEL });
+const logger = createLogger('actions');
 
 export function registerActionHandlers(app: App): void {
   // 승인 버튼 클릭
   app.action<BlockAction<ButtonAction>>(/^approve_task:/, async ({ action, ack, body, client }) => {
     await ack();
+    slackEventsTotal.inc({ type: 'action' });
 
     const channelId = body.channel?.id;
     const messageTs = body.message?.ts;
@@ -67,6 +68,7 @@ export function registerActionHandlers(app: App): void {
   // 거부 버튼 클릭
   app.action<BlockAction<ButtonAction>>(/^reject_task:/, async ({ action, ack, body, client }) => {
     await ack();
+    slackEventsTotal.inc({ type: 'action' });
 
     const channelId = body.channel?.id;
     const messageTs = body.message?.ts;
@@ -99,6 +101,7 @@ export function registerActionHandlers(app: App): void {
   // 취소 버튼 클릭
   app.action<BlockAction<ButtonAction>>(/^cancel_task:/, async ({ action, ack, body, client }) => {
     await ack();
+    slackEventsTotal.inc({ type: 'action' });
 
     const channelId = body.channel?.id;
     const messageTs = body.message?.ts;

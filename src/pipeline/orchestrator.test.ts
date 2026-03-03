@@ -4,8 +4,21 @@ import path from 'node:path';
 import { UnrecoverableError } from 'bullmq';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../config/index.js', () => ({
-  config: { LOG_LEVEL: 'silent' },
+const mockLoggerInstance = {
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+};
+
+vi.mock('../lib/logger.js', () => ({
+  createLogger: vi.fn(),
+}));
+
+vi.mock('../lib/metrics.js', () => ({
+  pipelineTotal: { inc: vi.fn() },
+  pipelineDuration: { observe: vi.fn() },
+  pipelineStepDuration: { observe: vi.fn() },
 }));
 
 vi.mock('../services/state.service.js', () => ({
@@ -52,6 +65,8 @@ vi.mock('./steps/create-pr.js', () => ({
   createPRStep: vi.fn(),
 }));
 
+import { createLogger } from '../lib/logger.js';
+import { pipelineDuration, pipelineStepDuration, pipelineTotal } from '../lib/metrics.js';
 import type { TaskJobData } from '../services/queue.service.js';
 import { notify } from '../services/slack-notifier.service.js';
 import { getPipelineState, savePipelineState } from '../services/state.service.js';
@@ -80,6 +95,10 @@ const mockBuildProgressBlocks = vi.mocked(buildPipelineProgressBlocks);
 const mockBuildCompletedBlocks = vi.mocked(buildPipelineCompletedBlocks);
 const mockBuildFailedBlocks = vi.mocked(buildPipelineFailedBlocks);
 const mockBuildCancelledBlocks = vi.mocked(buildPipelineCancelledBlocks);
+const mockPipelineTotal = vi.mocked(pipelineTotal);
+const mockPipelineDuration = vi.mocked(pipelineDuration);
+const mockPipelineStepDuration = vi.mocked(pipelineStepDuration);
+const mockCreateLogger = vi.mocked(createLogger);
 
 function makeJobData(overrides?: Partial<TaskJobData>): TaskJobData {
   return {
@@ -102,6 +121,10 @@ function makeJobData(overrides?: Partial<TaskJobData>): TaskJobData {
 describe('orchestrator', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // Restore createLogger mock implementation after resetAllMocks
+    mockCreateLogger.mockReturnValue(
+      mockLoggerInstance as unknown as ReturnType<typeof createLogger>,
+    );
     // By default, getPipelineState returns null (not cancelled)
     mockGetPipelineState.mockResolvedValue(null);
     // Restore block builder mock return values after resetAllMocks
@@ -280,6 +303,92 @@ describe('orchestrator', () => {
     for (const call of progressNotifyCalls) {
       expect(call[3]).toBeDefined();
     }
+  });
+
+  describe('observability', () => {
+    it('should call pipelineTotal.inc with status completed on success', async () => {
+      await runPipeline('job-1', makeJobData());
+
+      expect(mockPipelineTotal.inc).toHaveBeenCalledWith({ status: 'completed' });
+    });
+
+    it('should call pipelineTotal.inc with status failed on error', async () => {
+      mockCreateIssueStep.mockRejectedValue(new Error('step error'));
+
+      await expect(runPipeline('job-1', makeJobData())).rejects.toThrow('step error');
+
+      expect(mockPipelineTotal.inc).toHaveBeenCalledWith({ status: 'failed' });
+    });
+
+    it('should call pipelineStepDuration.observe for each completed step', async () => {
+      await runPipeline('job-1', makeJobData());
+
+      expect(mockPipelineStepDuration.observe).toHaveBeenCalledTimes(5);
+      expect(mockPipelineStepDuration.observe).toHaveBeenCalledWith(
+        { step: 'create_issue' },
+        expect.any(Number),
+      );
+      expect(mockPipelineStepDuration.observe).toHaveBeenCalledWith(
+        { step: 'clone_repo' },
+        expect.any(Number),
+      );
+      expect(mockPipelineStepDuration.observe).toHaveBeenCalledWith(
+        { step: 'generate_code' },
+        expect.any(Number),
+      );
+      expect(mockPipelineStepDuration.observe).toHaveBeenCalledWith(
+        { step: 'apply_and_push' },
+        expect.any(Number),
+      );
+      expect(mockPipelineStepDuration.observe).toHaveBeenCalledWith(
+        { step: 'create_pr' },
+        expect.any(Number),
+      );
+    });
+
+    it('should call pipelineDuration.observe on success', async () => {
+      await runPipeline('job-1', makeJobData());
+
+      expect(mockPipelineDuration.observe).toHaveBeenCalledWith(expect.any(Number));
+    });
+
+    it('should call pipelineDuration.observe on failure', async () => {
+      mockCreateIssueStep.mockRejectedValue(new Error('step error'));
+
+      await expect(runPipeline('job-1', makeJobData())).rejects.toThrow('step error');
+
+      expect(mockPipelineDuration.observe).toHaveBeenCalledWith(expect.any(Number));
+    });
+
+    it('should call pipelineTotal.inc with status cancelled on cancellation', async () => {
+      mockGetPipelineState.mockResolvedValue({
+        id: 'job-1',
+        threadTs: 'ts123',
+        channelId: 'C123',
+        request: makeJobData().request,
+        status: 'cancelled' as const,
+        cancelledBy: 'U999',
+        cancelledAt: Date.now(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+
+      await runPipeline('job-1', makeJobData());
+
+      expect(mockPipelineTotal.inc).toHaveBeenCalledWith({ status: 'cancelled' });
+    });
+
+    it('should save stepTimings in state on success', async () => {
+      await runPipeline('job-1', makeJobData());
+
+      const lastCall = mockSavePipelineState.mock.calls.at(-1)?.[0];
+      expect(lastCall?.stepTimings).toBeDefined();
+      expect(lastCall?.stepTimings).toHaveProperty('create_issue');
+      expect(lastCall?.stepTimings).toHaveProperty('clone_repo');
+      expect(lastCall?.stepTimings).toHaveProperty('generate_code');
+      expect(lastCall?.stepTimings).toHaveProperty('apply_and_push');
+      expect(lastCall?.stepTimings).toHaveProperty('create_pr');
+    });
   });
 
   describe('cancellation', () => {

@@ -1,9 +1,8 @@
 import type { App } from '@slack/bolt';
 import type { KnownBlock } from '@slack/types';
-import pino from 'pino';
-import { config } from '../config/index.js';
+import { createLogger } from '../lib/logger.js';
 
-const logger = pino({ name: 'notifications', level: config.LOG_LEVEL });
+const logger = createLogger('notifications');
 
 export async function addReaction(
   app: App,

@@ -1,9 +1,9 @@
 import type { KnownBlock } from '@slack/types';
 import { WebClient } from '@slack/web-api';
-import pino from 'pino';
 import { config } from '../config/index.js';
+import { createLogger } from '../lib/logger.js';
 
-const logger = pino({ name: 'slack-notifier', level: config.LOG_LEVEL });
+const logger = createLogger('slack-notifier');
 
 const client = new WebClient(config.SLACK_BOT_TOKEN);
 

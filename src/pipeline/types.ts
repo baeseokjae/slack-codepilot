@@ -2,6 +2,7 @@ import type { CodeChange, ParsedRequest, RepoInfo } from '../types/index.js';
 
 export interface PipelineContext {
   jobId: string;
+  correlationId: string;
   channelId: string;
   threadTs: string;
   userId: string;

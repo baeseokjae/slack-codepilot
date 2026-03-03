@@ -1,10 +1,11 @@
 import OpenAI from 'openai';
-import pino from 'pino';
 import { config } from '../config/index.js';
 import { CircuitBreaker } from '../lib/circuit-breaker.js';
+import { createLogger } from '../lib/logger.js';
+import { aiRequestDuration, aiRequestsTotal } from '../lib/metrics.js';
 import { RateLimiter } from '../lib/rate-limiter.js';
 
-const logger = pino({ name: 'ai-service', level: config.LOG_LEVEL });
+const logger = createLogger('ai-service');
 
 const client = new OpenAI({
   apiKey: config.QWEN_API_KEY,
@@ -35,23 +36,31 @@ export async function chatCompletion(
 ): Promise<string> {
   logger.debug({ messageCount: messages.length }, 'Sending chat completion request');
 
-  const content = await aiRateLimiter.execute(() =>
-    aiCircuitBreaker.execute(async () => {
-      const response = await client.chat.completions.create({
-        model: config.QWEN_MODEL,
-        messages,
-        temperature: options?.temperature ?? 0.1,
-        max_tokens: options?.maxTokens ?? 2048,
-      });
+  const startTime = Date.now();
+  let success = false;
+  try {
+    const content = await aiRateLimiter.execute(() =>
+      aiCircuitBreaker.execute(async () => {
+        const response = await client.chat.completions.create({
+          model: config.QWEN_MODEL,
+          messages,
+          temperature: options?.temperature ?? 0.1,
+          max_tokens: options?.maxTokens ?? 2048,
+        });
 
-      const result = response.choices[0]?.message?.content;
-      if (!result) {
-        throw new Error('Empty response from AI');
-      }
-      return result;
-    }),
-  );
+        const result = response.choices[0]?.message?.content;
+        if (!result) {
+          throw new Error('Empty response from AI');
+        }
+        return result;
+      }),
+    );
 
-  logger.debug({ responseLength: content.length }, 'Received chat completion response');
-  return content;
+    success = true;
+    logger.debug({ responseLength: content.length }, 'Received chat completion response');
+    return content;
+  } finally {
+    aiRequestDuration.observe((Date.now() - startTime) / 1000);
+    aiRequestsTotal.inc({ status: success ? 'success' : 'error' });
+  }
 }

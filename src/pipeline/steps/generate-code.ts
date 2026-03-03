@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import pino from 'pino';
 import { config } from '../../config/index.js';
+import { createLogger } from '../../lib/logger.js';
 import {
   buildCodeGenerationUserPrompt,
   CODE_GENERATION_SYSTEM_PROMPT,
@@ -10,7 +10,7 @@ import { chatCompletion } from '../../services/ai.service.js';
 import type { CodeChange } from '../../types/index.js';
 import type { PipelineContext } from '../types.js';
 
-const logger = pino({ name: 'step:generate-code', level: config.LOG_LEVEL });
+const logger = createLogger('step:generate-code');
 
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.next', '__pycache__']);
 const MAX_FILE_SIZE = 50_000;

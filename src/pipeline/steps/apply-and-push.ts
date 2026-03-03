@@ -1,13 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import pino from 'pino';
 import { simpleGit } from 'simple-git';
-import { config } from '../../config/index.js';
 import { validateCodeChanges } from '../../lib/code-validator.js';
+import { createLogger } from '../../lib/logger.js';
 import { notify } from '../../services/slack-notifier.service.js';
 import type { PipelineContext } from '../types.js';
 
-const logger = pino({ name: 'step:apply-and-push', level: config.LOG_LEVEL });
+const logger = createLogger('step:apply-and-push');
 
 export async function applyAndPushStep(ctx: PipelineContext): Promise<void> {
   if (!ctx.workspacePath || !ctx.codeChanges || !ctx.branchName) {

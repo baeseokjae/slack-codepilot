@@ -1,9 +1,9 @@
 import { type Job, Queue } from 'bullmq';
-import pino from 'pino';
 import { config } from '../config/index.js';
+import { createLogger } from '../lib/logger.js';
 import type { ParsedRequest } from '../types/index.js';
 
-const logger = pino({ name: 'queue-service', level: config.LOG_LEVEL });
+const logger = createLogger('queue-service');
 
 export interface TaskJobData {
   request: ParsedRequest;

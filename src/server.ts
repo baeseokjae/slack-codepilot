@@ -1,14 +1,15 @@
 import { App, ExpressReceiver } from '@slack/bolt';
-import pino from 'pino';
 import { config } from './config/index.js';
 import type { HealthStatus } from './lib/health.js';
 import { checkBullMQHealth, checkRedisHealth, deriveOverallStatus } from './lib/health.js';
+import { createLogger } from './lib/logger.js';
+import { metricsRegistry } from './lib/metrics.js';
 import { closeRedis, getRedis } from './services/state.service.js';
 import { registerActionHandlers } from './slack/actions.js';
 import { registerCommandHandlers } from './slack/commands.js';
 import { registerEventHandlers } from './slack/events.js';
 
-const logger = pino({ name: 'server', level: config.LOG_LEVEL });
+const logger = createLogger('server');
 
 const startTime = Date.now();
 
@@ -37,6 +38,18 @@ receiver.router.get('/health', async (_req, res) => {
   };
 
   res.status(status === 'unhealthy' ? 503 : 200).json(health);
+});
+
+// Metrics endpoint
+receiver.router.get('/metrics', async (_req, res) => {
+  try {
+    const metrics = await metricsRegistry.metrics();
+    res.set('Content-Type', metricsRegistry.contentType);
+    res.end(metrics);
+  } catch (err) {
+    logger.error({ err }, 'Failed to generate metrics');
+    res.status(500).end('Internal Server Error');
+  }
 });
 
 const app = new App({

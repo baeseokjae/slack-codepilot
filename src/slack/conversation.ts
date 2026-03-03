@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { App } from '@slack/bolt';
-import pino from 'pino';
-import { config } from '../config/index.js';
+import { createLogger } from '../lib/logger.js';
 import { generateFollowUp } from '../parser/follow-up.js';
 import { parseRequest } from '../parser/request-parser.js';
 import {
@@ -13,7 +12,7 @@ import type { ThreadContext } from '../types/index.js';
 import { buildConfirmationBlocks } from './blocks.js';
 import { sendThreadMessage } from './notifications.js';
 
-const logger = pino({ name: 'conversation', level: config.LOG_LEVEL });
+const logger = createLogger('conversation');
 const MAX_FOLLOW_UPS = 3;
 const CONFIDENCE_THRESHOLD = 0.7;
 

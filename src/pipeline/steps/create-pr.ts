@@ -1,10 +1,9 @@
-import pino from 'pino';
-import { config } from '../../config/index.js';
+import { createLogger } from '../../lib/logger.js';
 import { createPullRequest, findExistingPR } from '../../services/github.service.js';
 import { notify } from '../../services/slack-notifier.service.js';
 import type { PipelineContext } from '../types.js';
 
-const logger = pino({ name: 'step:create-pr', level: config.LOG_LEVEL });
+const logger = createLogger('step:create-pr');
 
 export async function createPRStep(ctx: PipelineContext): Promise<void> {
   if (!ctx.repoInfo || !ctx.branchName || !ctx.issueNumber) {

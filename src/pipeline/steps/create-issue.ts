@@ -1,10 +1,9 @@
-import pino from 'pino';
-import { config } from '../../config/index.js';
+import { createLogger } from '../../lib/logger.js';
 import { createIssue, findExistingIssue, resolveRepo } from '../../services/github.service.js';
 import { notify } from '../../services/slack-notifier.service.js';
 import type { PipelineContext } from '../types.js';
 
-const logger = pino({ name: 'step:create-issue', level: config.LOG_LEVEL });
+const logger = createLogger('step:create-issue');
 
 export async function createIssueStep(ctx: PipelineContext): Promise<void> {
   if (!ctx.request.targetRepo) {

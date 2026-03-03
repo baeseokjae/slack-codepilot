@@ -35,6 +35,7 @@ export interface PipelineState {
   createdAt: number;
   updatedAt: number;
   currentStep?: PipelineStep;
+  stepTimings?: Record<string, number>;
   issueNumber?: number;
   issueUrl?: string;
   branchName?: string;

@@ -168,12 +168,21 @@ export function buildPipelineCompletedBlocks(state: PipelineState): KnownBlock[]
         ? `PR #${state.prNumber}`
         : 'PR 없음';
 
+  let timingsText = '';
+  if (state.stepTimings) {
+    const entries = Object.entries(state.stepTimings);
+    const totalMs = entries.reduce((sum, [, ms]) => sum + ms, 0);
+    const lines = entries.map(([step, ms]) => `  ${step}: ${(ms / 1000).toFixed(1)}s`);
+    lines.push(`  *총 소요 시간: ${(totalMs / 1000).toFixed(1)}s*`);
+    timingsText = `\n\n:stopwatch: *소요 시간*\n${lines.join('\n')}`;
+  }
+
   return [
     {
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `:white_check_mark: *작업이 완료되었습니다!*\n\n:ticket: ${issuePart}\n:merged: ${prPart}\n\nPR을 리뷰하고 머지해주세요!`,
+        text: `:white_check_mark: *작업이 완료되었습니다!*\n\n:ticket: ${issuePart}\n:merged: ${prPart}\n\nPR을 리뷰하고 머지해주세요!${timingsText}`,
       },
     },
   ];

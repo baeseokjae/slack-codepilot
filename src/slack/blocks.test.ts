@@ -296,6 +296,38 @@ describe('buildPipelineCompletedBlocks', () => {
     const allText = JSON.stringify(blocks[0]);
     expect(allText).toContain('완료');
   });
+
+  it('should display step timings when stepTimings is present', () => {
+    const state = makePipelineState({
+      status: 'completed',
+      stepTimings: {
+        create_issue: 2000,
+        clone_repo: 5000,
+        generate_code: 30000,
+        apply_and_push: 3000,
+        create_pr: 1000,
+      },
+    });
+    const blocks = buildPipelineCompletedBlocks(state);
+
+    const allText = JSON.stringify(blocks);
+    expect(allText).toContain(':stopwatch:');
+    expect(allText).toContain('소요 시간');
+    expect(allText).toContain('create_issue');
+    expect(allText).toContain('2.0s');
+    expect(allText).toContain('총 소요 시간');
+    // Total = 2000+5000+30000+3000+1000 = 41000ms = 41.0s
+    expect(allText).toContain('41.0s');
+  });
+
+  it('should not display step timings section when stepTimings is absent', () => {
+    const state = makePipelineState({ status: 'completed' });
+    const blocks = buildPipelineCompletedBlocks(state);
+
+    const allText = JSON.stringify(blocks);
+    expect(allText).not.toContain(':stopwatch:');
+    expect(allText).not.toContain('소요 시간');
+  });
 });
 
 describe('buildPipelineFailedBlocks', () => {

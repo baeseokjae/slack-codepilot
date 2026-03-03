@@ -45,6 +45,7 @@ describe('generateCodeStep', () => {
   function makeCtx(overrides?: Partial<PipelineContext>): PipelineContext {
     return {
       jobId: 'job-1',
+      correlationId: 'test-correlation-id',
       channelId: 'C123',
       threadTs: 'ts123',
       userId: 'U123',
