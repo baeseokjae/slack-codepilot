@@ -3,6 +3,7 @@ import path from 'node:path';
 import pino from 'pino';
 import { simpleGit } from 'simple-git';
 import { config } from '../../config/index.js';
+import { validateCodeChanges } from '../../lib/code-validator.js';
 import { notify } from '../../services/slack-notifier.service.js';
 import type { PipelineContext } from '../types.js';
 
@@ -15,6 +16,8 @@ export async function applyAndPushStep(ctx: PipelineContext): Promise<void> {
 
   const git = simpleGit(ctx.workspacePath);
 
+  validateCodeChanges(ctx.codeChanges);
+
   for (const change of ctx.codeChanges) {
     const filePath = path.resolve(ctx.workspacePath, change.filePath);
 
@@ -24,6 +27,16 @@ export async function applyAndPushStep(ctx: PipelineContext): Promise<void> {
         'Skipping file outside workspace (path traversal)',
       );
       continue;
+    }
+
+    try {
+      const stat = await fs.lstat(filePath);
+      if (stat.isSymbolicLink()) {
+        logger.warn({ filePath: change.filePath }, 'Skipping symbolic link');
+        continue;
+      }
+    } catch {
+      // File does not exist yet — OK for new file creation
     }
 
     if (change.action === 'delete') {

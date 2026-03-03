@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { UnrecoverableError } from 'bullmq';
 import pino from 'pino';
 import { config } from '../config/index.js';
+import { sanitizeErrorObject } from '../lib/error-sanitizer.js';
 import type { TaskJobData } from '../services/queue.service.js';
 import { notify } from '../services/slack-notifier.service.js';
 import { getPipelineState, savePipelineState } from '../services/state.service.js';
@@ -100,7 +101,7 @@ export async function runPipeline(jobId: string, data: TaskJobData): Promise<voi
     await notify(channelId, threadTs, '작업 완료!', buildPipelineCompletedBlocks(state));
   } catch (err) {
     state.status = 'failed';
-    state.error = err instanceof Error ? err.message : String(err);
+    state.error = sanitizeErrorObject(err);
     state.updatedAt = Date.now();
     await savePipelineState(state);
 

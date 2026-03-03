@@ -104,3 +104,9 @@ export async function listRecentPipelines(limit = 10): Promise<PipelineState[]> 
   const states = await Promise.all(ids.map((id) => getPipelineState(id)));
   return states.filter((s): s is PipelineState => s !== null);
 }
+
+export function closeRedis(): void {
+  if (redis) {
+    redis.disconnect();
+  }
+}

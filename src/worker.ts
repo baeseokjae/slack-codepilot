@@ -1,9 +1,11 @@
+import fs from 'node:fs';
 import { UnrecoverableError, Worker } from 'bullmq';
 import pino from 'pino';
 import { config } from './config/index.js';
 import { runPipeline } from './pipeline/orchestrator.js';
 import { validateGitHubConfig } from './services/github.service.js';
 import type { TaskJobData } from './services/queue.service.js';
+import { closeRedis } from './services/state.service.js';
 
 const logger = pino({ name: 'worker', level: config.LOG_LEVEL });
 
@@ -49,10 +51,47 @@ worker.on('error', (err) => {
 
 logger.info('Worker started, listening for jobs on queue: %s', QUEUE_NAME);
 
+// File-based health check for Docker
+const HEALTH_FILE = '/tmp/worker-health';
+const healthInterval = setInterval(() => {
+  try {
+    fs.writeFileSync(HEALTH_FILE, new Date().toISOString());
+  } catch {
+    // Ignore write errors
+  }
+}, 10000);
+
+// Write initial health file
+try {
+  fs.writeFileSync(HEALTH_FILE, new Date().toISOString());
+} catch {
+  // Ignore
+}
+
+let isShuttingDown = false;
+
 async function shutdown(): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
   logger.info('Worker shutting down...');
-  await worker.close();
-  process.exit(0);
+  clearInterval(healthInterval);
+
+  const forceExit = setTimeout(() => {
+    logger.error('Shutdown timed out, forcing exit');
+    process.exit(1);
+  }, config.SHUTDOWN_TIMEOUT_MS);
+
+  try {
+    await worker.close();
+    closeRedis();
+    logger.info('Worker shut down gracefully');
+  } catch (err) {
+    logger.error({ err }, 'Error during shutdown');
+  } finally {
+    clearTimeout(forceExit);
+    process.exit(0);
+  }
 }
 
 process.on('SIGTERM', shutdown);

@@ -16,12 +16,15 @@ const envSchema = z.object({
   GITHUB_INSTALLATION_ID: z.coerce.number().optional(),
   GIT_WORKSPACE_DIR: z.string().default('/tmp/codepilot-workspaces'),
   CODE_GEN_MAX_TOKENS: z.coerce.number().default(8192),
+  SHUTDOWN_TIMEOUT_MS: z.coerce.number().default(30000),
 });
 
 const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
-  console.error('Invalid environment variables:', parsed.error.flatten().fieldErrors);
+  process.stderr.write(
+    `Invalid environment variables: ${JSON.stringify(parsed.error.flatten().fieldErrors)}\n`,
+  );
   process.exit(1);
 }
 

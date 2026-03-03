@@ -2,9 +2,16 @@ import { createAppAuth } from '@octokit/auth-app';
 import { Octokit } from '@octokit/rest';
 import pino from 'pino';
 import { config } from '../config/index.js';
+import { CircuitBreaker } from '../lib/circuit-breaker.js';
 import type { RepoInfo } from '../types/index.js';
 
 const logger = pino({ name: 'github-service', level: config.LOG_LEVEL });
+
+const githubCircuitBreaker = new CircuitBreaker({
+  name: 'github',
+  failureThreshold: 5,
+  resetTimeoutMs: 60000,
+});
 
 let octokit: Octokit | null = null;
 
@@ -45,7 +52,6 @@ export function getOctokit(): Octokit {
 }
 
 export async function resolveRepo(repoFullName: string): Promise<RepoInfo> {
-  const kit = getOctokit();
   const parts = repoFullName.split('/');
 
   if (parts.length !== 2 || !parts[0] || !parts[1]) {
@@ -54,14 +60,17 @@ export async function resolveRepo(repoFullName: string): Promise<RepoInfo> {
 
   const [owner, repo] = parts;
 
-  const { data } = await kit.repos.get({ owner, repo });
-  logger.info({ owner, repo, defaultBranch: data.default_branch }, 'Resolved repository');
+  return githubCircuitBreaker.execute(async () => {
+    const kit = getOctokit();
+    const { data } = await kit.repos.get({ owner, repo });
+    logger.info({ owner, repo, defaultBranch: data.default_branch }, 'Resolved repository');
 
-  return {
-    owner,
-    repo,
-    defaultBranch: data.default_branch,
-  };
+    return {
+      owner,
+      repo,
+      defaultBranch: data.default_branch,
+    };
+  });
 }
 
 export async function createIssue(params: {
@@ -71,16 +80,18 @@ export async function createIssue(params: {
   body: string;
   labels?: string[];
 }): Promise<{ number: number; url: string }> {
-  const kit = getOctokit();
-  const { data } = await kit.issues.create({
-    owner: params.owner,
-    repo: params.repo,
-    title: params.title,
-    body: params.body,
-    labels: params.labels,
+  return githubCircuitBreaker.execute(async () => {
+    const kit = getOctokit();
+    const { data } = await kit.issues.create({
+      owner: params.owner,
+      repo: params.repo,
+      title: params.title,
+      body: params.body,
+      labels: params.labels,
+    });
+    logger.info({ issueNumber: data.number, url: data.html_url }, 'Created GitHub issue');
+    return { number: data.number, url: data.html_url };
   });
-  logger.info({ issueNumber: data.number, url: data.html_url }, 'Created GitHub issue');
-  return { number: data.number, url: data.html_url };
 }
 
 export async function createPullRequest(params: {
@@ -91,17 +102,19 @@ export async function createPullRequest(params: {
   head: string;
   base: string;
 }): Promise<{ number: number; url: string }> {
-  const kit = getOctokit();
-  const { data } = await kit.pulls.create({
-    owner: params.owner,
-    repo: params.repo,
-    title: params.title,
-    body: params.body,
-    head: params.head,
-    base: params.base,
+  return githubCircuitBreaker.execute(async () => {
+    const kit = getOctokit();
+    const { data } = await kit.pulls.create({
+      owner: params.owner,
+      repo: params.repo,
+      title: params.title,
+      body: params.body,
+      head: params.head,
+      base: params.base,
+    });
+    logger.info({ prNumber: data.number, url: data.html_url }, 'Created pull request');
+    return { number: data.number, url: data.html_url };
   });
-  logger.info({ prNumber: data.number, url: data.html_url }, 'Created pull request');
-  return { number: data.number, url: data.html_url };
 }
 
 export async function findExistingIssue(params: {
@@ -109,19 +122,21 @@ export async function findExistingIssue(params: {
   repo: string;
   title: string;
 }): Promise<{ number: number; url: string } | null> {
-  const kit = getOctokit();
-  const { data } = await kit.issues.listForRepo({
-    owner: params.owner,
-    repo: params.repo,
-    state: 'open',
-    per_page: 100,
+  return githubCircuitBreaker.execute(async () => {
+    const kit = getOctokit();
+    const { data } = await kit.issues.listForRepo({
+      owner: params.owner,
+      repo: params.repo,
+      state: 'open',
+      per_page: 100,
+    });
+    const existing = data.find((issue) => issue.title === params.title && !issue.pull_request);
+    if (existing) {
+      logger.info({ issueNumber: existing.number }, 'Found existing issue');
+      return { number: existing.number, url: existing.html_url };
+    }
+    return null;
   });
-  const existing = data.find((issue) => issue.title === params.title && !issue.pull_request);
-  if (existing) {
-    logger.info({ issueNumber: existing.number }, 'Found existing issue');
-    return { number: existing.number, url: existing.html_url };
-  }
-  return null;
 }
 
 export async function findExistingPR(params: {
@@ -129,22 +144,26 @@ export async function findExistingPR(params: {
   repo: string;
   head: string;
 }): Promise<{ number: number; url: string } | null> {
-  const kit = getOctokit();
-  const { data } = await kit.pulls.list({
-    owner: params.owner,
-    repo: params.repo,
-    head: `${params.owner}:${params.head}`,
-    state: 'open',
+  return githubCircuitBreaker.execute(async () => {
+    const kit = getOctokit();
+    const { data } = await kit.pulls.list({
+      owner: params.owner,
+      repo: params.repo,
+      head: `${params.owner}:${params.head}`,
+      state: 'open',
+    });
+    if (data.length > 0) {
+      logger.info({ prNumber: data[0].number }, 'Found existing PR');
+      return { number: data[0].number, url: data[0].html_url };
+    }
+    return null;
   });
-  if (data.length > 0) {
-    logger.info({ prNumber: data[0].number }, 'Found existing PR');
-    return { number: data[0].number, url: data[0].html_url };
-  }
-  return null;
 }
 
 export async function getAuthenticatedCloneUrl(owner: string, repo: string): Promise<string> {
-  const kit = getOctokit();
-  const auth = (await kit.auth({ type: 'installation' })) as { token: string };
-  return `https://x-access-token:${auth.token}@github.com/${owner}/${repo}.git`;
+  return githubCircuitBreaker.execute(async () => {
+    const kit = getOctokit();
+    const auth = (await kit.auth({ type: 'installation' })) as { token: string };
+    return `https://x-access-token:${auth.token}@github.com/${owner}/${repo}.git`;
+  });
 }
