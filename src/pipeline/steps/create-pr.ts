@@ -1,6 +1,6 @@
+import { config } from '../../config/index.js';
 import { createLogger } from '../../lib/logger.js';
-import { createPullRequest, findExistingPR } from '../../services/github.service.js';
-import { notify } from '../../services/slack-notifier.service.js';
+import { addAssignees, createPullRequest, findExistingPR, requestReviewers } from '../../services/github.service.js';
 import type { PipelineContext } from '../types.js';
 
 const logger = createLogger('step:create-pr');
@@ -33,7 +33,34 @@ export async function createPRStep(ctx: PipelineContext): Promise<void> {
 
     ctx.prNumber = pr.number;
     ctx.prUrl = pr.url;
+
+    // PR assignee 지정 (Slack 요청자)
+    if (ctx.githubUsername) {
+      try {
+        await addAssignees({
+          owner,
+          repo,
+          issueNumber: pr.number,
+          assignees: [ctx.githubUsername],
+        });
+      } catch (err) {
+        logger.warn({ err, assignee: ctx.githubUsername }, 'Failed to add PR assignee');
+      }
+    }
+
+    // 팀 리뷰어 지정
+    if (config.GITHUB_REVIEW_TEAM) {
+      try {
+        await requestReviewers({
+          owner,
+          repo,
+          pullNumber: pr.number,
+          teamReviewers: [config.GITHUB_REVIEW_TEAM],
+        });
+      } catch (err) {
+        logger.warn({ err, team: config.GITHUB_REVIEW_TEAM }, 'Failed to request team reviewers');
+      }
+    }
   }
 
-  await notify(ctx.channelId, ctx.threadTs, `:merged: PR #${ctx.prNumber} 생성 완료\n${ctx.prUrl}`);
 }

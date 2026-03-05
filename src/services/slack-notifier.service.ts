@@ -29,6 +29,18 @@ export async function notify(
   }
 }
 
+export async function getSlackUserEmail(userId: string): Promise<string | null> {
+  try {
+    const result = await client.users.info({ user: userId });
+    const email = result.user?.profile?.email ?? null;
+    logger.debug({ userId, email }, 'Fetched Slack user email');
+    return email;
+  } catch (err) {
+    logger.error({ err, userId }, 'Failed to fetch Slack user email');
+    return null;
+  }
+}
+
 export async function updateNotification(
   channelId: string,
   ts: string,

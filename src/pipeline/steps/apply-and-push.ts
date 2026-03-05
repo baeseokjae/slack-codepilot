@@ -3,7 +3,6 @@ import path from 'node:path';
 import { simpleGit } from 'simple-git';
 import { validateCodeChanges } from '../../lib/code-validator.js';
 import { createLogger } from '../../lib/logger.js';
-import { notify } from '../../services/slack-notifier.service.js';
 import type { PipelineContext } from '../types.js';
 
 const logger = createLogger('step:apply-and-push');
@@ -56,9 +55,4 @@ export async function applyAndPushStep(ctx: PipelineContext): Promise<void> {
   await git.push('origin', ctx.branchName, ['--force']);
 
   logger.info({ branchName: ctx.branchName }, 'Changes committed and pushed');
-  await notify(
-    ctx.channelId,
-    ctx.threadTs,
-    `:rocket: 코드가 \`${ctx.branchName}\` 브랜치에 push 되었습니다.`,
-  );
 }

@@ -25,18 +25,29 @@ Guidelines:
 - Do NOT include explanations outside the JSON array.
 - Respond with valid JSON only.`;
 
+import type { ConversationMessage } from '../types/index.js';
+
 export function buildCodeGenerationUserPrompt(params: {
   type: string;
   title: string;
   description: string;
   fileTree: string;
   fileContents: string;
+  conversationHistory?: ConversationMessage[];
 }): string {
+  let conversationSection = '';
+  if (params.conversationHistory?.length) {
+    const lines = params.conversationHistory.map(
+      (m) => `[${m.role}]: ${m.content}`,
+    );
+    conversationSection = `\n## Conversation Context\n${lines.join('\n')}\n`;
+  }
+
   return `## Task
 - **Type:** ${params.type}
 - **Title:** ${params.title}
 - **Description:** ${params.description}
-
+${conversationSection}
 ## Repository File Tree
 \`\`\`
 ${params.fileTree}

@@ -5,8 +5,8 @@ import type { TaskJobData } from '../services/queue.service.js';
 import type { PipelineState, ThreadContext } from '../types/index.js';
 
 const logger = createLogger('state-service');
-const THREAD_TTL = 3600; // 1 hour
-const PENDING_TTL = 1800; // 30 minutes
+const THREAD_TTL = config.THREAD_TTL_SECONDS;
+const PENDING_TTL = config.PENDING_TTL_SECONDS;
 
 let redis: Redis;
 

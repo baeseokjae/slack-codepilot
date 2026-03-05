@@ -15,7 +15,7 @@ vi.mock('../config/index.js', () => ({
     VERTEX_PROJECT_ID: 'my-gcp-project',
     VERTEX_LOCATION: 'us-central1',
     VERTEX_MODEL: 'google/gemini-2.5-flash',
-    QWEN_MODEL: 'qwen3-coder',
+    OPENAI_MODEL: 'qwen3-coder',
   },
 }));
 

@@ -17,10 +17,12 @@ vi.mock('../../prompts/code-generation.js', () => ({
 }));
 
 import { chatCompletion } from '../../services/ai.service.js';
+import { buildCodeGenerationUserPrompt } from '../../prompts/code-generation.js';
 import type { PipelineContext } from '../types.js';
 import { generateCodeStep } from './generate-code.js';
 
 const mockChatCompletion = vi.mocked(chatCompletion);
+const mockBuildPrompt = vi.mocked(buildCodeGenerationUserPrompt);
 
 // We need a real filesystem for buildFileTree/readRelevantFiles
 // so we mock the workspace to use a temporary directory
@@ -116,5 +118,66 @@ describe('generateCodeStep', () => {
       maxTokens: 8192,
       temperature: 0.1,
     });
+  });
+
+  it('should pass conversationHistory to buildCodeGenerationUserPrompt', async () => {
+    const changes = [{ filePath: 'f.ts', content: 'x', action: 'create' }];
+    mockChatCompletion.mockResolvedValue(JSON.stringify(changes));
+
+    const history = [
+      { role: 'user' as const, content: 'README 업데이트해줘', timestamp: 'ts1' },
+      { role: 'assistant' as const, content: '어떤 내용?', timestamp: 'ts2' },
+    ];
+    const ctx = makeCtx({ conversationHistory: history });
+    await generateCodeStep(ctx);
+
+    expect(mockBuildPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationHistory: history }),
+    );
+  });
+
+  it('should trim conversation history exceeding MAX_CONVERSATION_CHARS', async () => {
+    const changes = [{ filePath: 'f.ts', content: 'x', action: 'create' }];
+    mockChatCompletion.mockResolvedValue(JSON.stringify(changes));
+
+    // Create messages that exceed 4000 chars total
+    const longMsg = 'x'.repeat(3000);
+    const history = [
+      { role: 'user' as const, content: longMsg, timestamp: 'ts1' },
+      { role: 'assistant' as const, content: 'short reply', timestamp: 'ts2' },
+      { role: 'user' as const, content: longMsg, timestamp: 'ts3' },
+    ];
+    const ctx = makeCtx({ conversationHistory: history });
+    await generateCodeStep(ctx);
+
+    // The first message should be trimmed to fit within budget
+    const passedHistory = mockBuildPrompt.mock.calls[0][0].conversationHistory;
+    expect(passedHistory).toBeDefined();
+    expect(passedHistory!.length).toBeLessThan(3);
+  });
+
+  it('should repair AI response with unescaped newlines in JSON strings', async () => {
+    // Simulate AI returning literal newlines inside JSON string values
+    const raw = '[\n  {\n    "filePath": "README.md",\n    "content": "# Title\n\nSome text\nAnother line",\n    "action": "create"\n  }\n]';
+    mockChatCompletion.mockResolvedValue(raw);
+
+    const ctx = makeCtx();
+    await generateCodeStep(ctx);
+
+    expect(ctx.codeChanges).toEqual([
+      { filePath: 'README.md', content: '# Title\n\nSome text\nAnother line', action: 'create' },
+    ]);
+  });
+
+  it('should work without conversationHistory (backward compat)', async () => {
+    const changes = [{ filePath: 'f.ts', content: 'x', action: 'create' }];
+    mockChatCompletion.mockResolvedValue(JSON.stringify(changes));
+
+    const ctx = makeCtx();
+    await generateCodeStep(ctx);
+
+    expect(mockBuildPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationHistory: undefined }),
+    );
   });
 });

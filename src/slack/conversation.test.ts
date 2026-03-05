@@ -5,9 +5,11 @@ vi.mock('../config/index.js', () => ({
     LOG_LEVEL: 'silent',
     AI_PROVIDER: 'openai',
     REDIS_URL: 'redis://localhost:6379',
-    QWEN_API_KEY: 'test',
-    QWEN_API_BASE_URL: 'http://test',
-    QWEN_MODEL: 'test',
+    OPENAI_API_KEY: 'test',
+    OPENAI_BASE_URL: 'http://test',
+    OPENAI_MODEL: 'test',
+    THREAD_TTL_SECONDS: 3600,
+    PENDING_TTL_SECONDS: 1800,
   },
 }));
 
@@ -82,6 +84,11 @@ describe('conversation', () => {
 
       expect(mockSaveThreadContext).toHaveBeenCalledOnce();
       expect(mockSavePendingConfirmation).toHaveBeenCalledOnce();
+      // Verify conversationHistory is passed
+      const pendingArgs = mockSavePendingConfirmation.mock.calls[0];
+      expect(pendingArgs[1].conversationHistory).toEqual([
+        { role: 'user', content: '로그인 버그 수정', timestamp: 'ts123' },
+      ]);
       expect(mockBuildConfirmationBlocks).toHaveBeenCalledOnce();
       expect(mockSendThreadMessage).toHaveBeenCalledOnce();
       // Should send with blocks (5th argument)
@@ -165,6 +172,11 @@ describe('conversation', () => {
       await handleFollowUpReply(app, 'C123', 'ts123', '비밀번호 입력하면 500 에러나요');
 
       expect(mockSavePendingConfirmation).toHaveBeenCalledOnce();
+      // Verify conversationHistory includes original + follow-up messages
+      const pendingArgs = mockSavePendingConfirmation.mock.calls[0];
+      expect(pendingArgs[1].conversationHistory).toHaveLength(3);
+      expect(pendingArgs[1].conversationHistory![0]).toEqual({ role: 'user', content: '버그 있어요', timestamp: 'ts123' });
+      expect(pendingArgs[1].conversationHistory![2].content).toBe('비밀번호 입력하면 500 에러나요');
       expect(mockBuildConfirmationBlocks).toHaveBeenCalledOnce();
       const callArgs = mockSendThreadMessage.mock.calls[0];
       expect(callArgs[3]).toContain('새 작업 요청');
@@ -172,7 +184,7 @@ describe('conversation', () => {
       expect(Array.isArray(callArgs[4])).toBe(true);
     });
 
-    it('should not exceed MAX_FOLLOW_UPS', async () => {
+    it('should force proceed with confirmation when MAX_FOLLOW_UPS is reached', async () => {
       const app = createMockApp();
       mockGetThreadContext.mockResolvedValue({
         threadTs: 'ts123',
@@ -197,8 +209,15 @@ describe('conversation', () => {
       await handleFollowUpReply(app, 'C123', 'ts123', '모르겠어요');
 
       expect(mockGenerateFollowUp).not.toHaveBeenCalled();
-      expect(mockSavePendingConfirmation).not.toHaveBeenCalled();
-      expect(mockSendThreadMessage.mock.calls[0][3]).toContain('충분한 정보를 얻지 못했습니다');
+      // Should force proceed with confirmation instead of giving up
+      expect(mockSavePendingConfirmation).toHaveBeenCalledOnce();
+      const pendingArgs = mockSavePendingConfirmation.mock.calls[0];
+      expect(pendingArgs[1].request.confidence).toBe(1.0);
+      expect(pendingArgs[1].request.missingInfo).toBeNull();
+      expect(mockBuildConfirmationBlocks).toHaveBeenCalledOnce();
+      const callArgs = mockSendThreadMessage.mock.calls[0];
+      expect(callArgs[3]).toContain('새 작업 요청');
+      expect(callArgs[4]).toBeDefined();
     });
 
     it('should silently return when no thread context exists', async () => {

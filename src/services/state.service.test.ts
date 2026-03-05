@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../config/index.js', () => ({
-  config: { LOG_LEVEL: 'silent', REDIS_URL: 'redis://localhost:6379' },
+  config: { LOG_LEVEL: 'silent', REDIS_URL: 'redis://localhost:6379', THREAD_TTL_SECONDS: 3600, PENDING_TTL_SECONDS: 1800 },
 }));
 
 const mockRedis = {

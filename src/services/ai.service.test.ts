@@ -11,9 +11,9 @@ vi.mock('../config/index.js', () => ({
   config: {
     LOG_LEVEL: 'silent',
     AI_PROVIDER: 'openai',
-    QWEN_API_KEY: 'test-key',
-    QWEN_API_BASE_URL: 'https://test.example.com',
-    QWEN_MODEL: 'test-model',
+    OPENAI_API_KEY: 'test-key',
+    OPENAI_BASE_URL: 'https://test.example.com',
+    OPENAI_MODEL: 'test-model',
   },
 }));
 
@@ -107,6 +107,49 @@ describe('ai.service', () => {
     await expect(chatCompletion([{ role: 'user', content: 'test' }])).rejects.toThrow(
       'Network error',
     );
+  });
+
+  it('should retry on 429 rate limit errors', async () => {
+    vi.useFakeTimers();
+    const rateLimitError = new Error('429 status code (no body)');
+    Object.assign(rateLimitError, { status: 429, headers: {} });
+
+    mockCreate
+      .mockRejectedValueOnce(rateLimitError)
+      .mockResolvedValueOnce({
+        choices: [{ message: { content: 'Success after retry' } }],
+      });
+
+    const promise = chatCompletion([{ role: 'user', content: 'test' }]);
+    await vi.advanceTimersByTimeAsync(2000);
+    const result = await promise;
+
+    expect(result).toBe('Success after retry');
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('should throw after exhausting rate limit retries', async () => {
+    vi.useFakeTimers();
+    const rateLimitError = new Error('429 status code (no body)');
+    Object.assign(rateLimitError, { status: 429, headers: {} });
+
+    mockCreate.mockRejectedValue(rateLimitError);
+
+    const promise = chatCompletion([{ role: 'user', content: 'test' }]);
+    promise.catch(() => {}); // prevent unhandled rejection warning
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(promise).rejects.toThrow('429');
+    // 1 initial + 3 retries = 4 total calls
+    expect(mockCreate).toHaveBeenCalledTimes(4);
+    vi.useRealTimers();
+  });
+
+  it('should not retry on non-429 errors', async () => {
+    mockCreate.mockRejectedValue(new Error('500 Internal Server Error'));
+
+    await expect(chatCompletion([{ role: 'user', content: 'test' }])).rejects.toThrow('500');
+    expect(mockCreate).toHaveBeenCalledTimes(1);
   });
 
   it('should pass multiple messages to the API', async () => {

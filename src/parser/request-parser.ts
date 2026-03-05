@@ -16,9 +16,9 @@ export async function parseRequest(
     for (const msg of conversationHistory) {
       messages.push({ role: msg.role === 'user' ? 'user' : 'assistant', content: msg.content });
     }
+  } else {
+    messages.push({ role: 'user', content: text });
   }
-
-  messages.push({ role: 'user', content: text });
 
   const raw = await chatCompletion(messages);
   logger.info({ raw: raw.slice(0, 500) }, 'Raw AI response');

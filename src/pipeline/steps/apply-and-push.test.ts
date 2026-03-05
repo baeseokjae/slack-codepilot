@@ -23,16 +23,10 @@ vi.mock('simple-git', () => ({
   })),
 }));
 
-vi.mock('../../services/slack-notifier.service.js', () => ({
-  notify: vi.fn(),
-}));
-
 import { validateCodeChanges } from '../../lib/code-validator.js';
-import { notify } from '../../services/slack-notifier.service.js';
 import type { PipelineContext } from '../types.js';
 import { applyAndPushStep } from './apply-and-push.js';
 
-const mockNotify = vi.mocked(notify);
 const mockValidateCodeChanges = vi.mocked(validateCodeChanges);
 
 describe('applyAndPushStep', () => {
@@ -123,17 +117,6 @@ describe('applyAndPushStep', () => {
     expect(mockAdd).toHaveBeenCalledWith('.');
     expect(mockCommit).toHaveBeenCalledOnce();
     expect(mockPush).toHaveBeenCalledWith('origin', 'codepilot/feature/add-feature', ['--force']);
-  });
-
-  it('should send Slack notification after push', async () => {
-    const ctx = makeCtx({
-      codeChanges: [{ filePath: 'file.ts', content: 'test', action: 'create' }],
-    });
-
-    await applyAndPushStep(ctx);
-
-    expect(mockNotify).toHaveBeenCalledOnce();
-    expect(mockNotify.mock.calls[0][2]).toContain('push');
   });
 
   it('should skip files with path traversal attempts', async () => {

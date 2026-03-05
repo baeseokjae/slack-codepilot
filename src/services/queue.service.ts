@@ -1,12 +1,13 @@
 import { type Job, Queue } from 'bullmq';
 import { config } from '../config/index.js';
 import { createLogger } from '../lib/logger.js';
-import type { ParsedRequest } from '../types/index.js';
+import type { ConversationMessage, ParsedRequest } from '../types/index.js';
 
 const logger = createLogger('queue-service');
 
 export interface TaskJobData {
   request: ParsedRequest;
+  conversationHistory?: ConversationMessage[];
   channelId: string;
   threadTs: string;
   userId: string;

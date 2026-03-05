@@ -7,7 +7,7 @@ import {
   CODE_GENERATION_SYSTEM_PROMPT,
 } from '../../prompts/code-generation.js';
 import { chatCompletion } from '../../services/ai.service.js';
-import type { CodeChange } from '../../types/index.js';
+import type { CodeChange, ConversationMessage } from '../../types/index.js';
 import type { PipelineContext } from '../types.js';
 
 const logger = createLogger('step:generate-code');
@@ -15,6 +15,7 @@ const logger = createLogger('step:generate-code');
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.next', '__pycache__']);
 const MAX_FILE_SIZE = 50_000;
 const MAX_FILES_TO_READ = 30;
+const MAX_CONVERSATION_CHARS = 4000;
 
 async function buildFileTree(dir: string, prefix = ''): Promise<string> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -69,12 +70,68 @@ async function readRelevantFiles(dir: string): Promise<string> {
   return results.join('\n\n');
 }
 
+/**
+ * Escape literal control characters (newlines, tabs, etc.) inside JSON string values.
+ * Walks the raw text char-by-char, tracking whether we're inside a quoted string.
+ */
+function repairJsonStrings(raw: string): string {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+
+    if (escaped) {
+      result += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === '\\' && inString) {
+      result += ch;
+      escaped = true;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = !inString;
+      result += ch;
+      continue;
+    }
+
+    if (inString) {
+      if (ch === '\n') { result += '\\n'; continue; }
+      if (ch === '\r') { result += '\\r'; continue; }
+      if (ch === '\t') { result += '\\t'; continue; }
+    }
+
+    result += ch;
+  }
+
+  return result;
+}
+
 export async function generateCodeStep(ctx: PipelineContext): Promise<void> {
   if (!ctx.workspacePath) {
     throw new Error('workspacePath is required for generate-code step');
   }
 
   logger.info('Building file tree and reading repository contents');
+
+  // Trim conversation history to fit within token budget
+  let trimmedHistory: ConversationMessage[] | undefined;
+  if (ctx.conversationHistory?.length) {
+    trimmedHistory = [...ctx.conversationHistory];
+    let totalChars = trimmedHistory.reduce((sum, m) => sum + m.content.length, 0);
+    while (totalChars > MAX_CONVERSATION_CHARS && trimmedHistory.length > 1) {
+      const removed = trimmedHistory.shift()!;
+      totalChars -= removed.content.length;
+    }
+    logger.info({ messageCount: trimmedHistory.length, totalChars }, 'Conversation history included');
+  } else {
+    logger.warn('No conversation history available for code generation');
+  }
 
   const fileTree = await buildFileTree(ctx.workspacePath);
   const fileContents = await readRelevantFiles(ctx.workspacePath);
@@ -85,6 +142,7 @@ export async function generateCodeStep(ctx: PipelineContext): Promise<void> {
     description: ctx.request.description,
     fileTree,
     fileContents,
+    conversationHistory: trimmedHistory,
   });
 
   logger.info({ promptLength: userPrompt.length }, 'Sending code generation request to AI');
@@ -106,8 +164,14 @@ export async function generateCodeStep(ctx: PipelineContext): Promise<void> {
   try {
     changes = JSON.parse(cleaned) as CodeChange[];
   } catch {
-    logger.error({ raw: cleaned.slice(0, 500) }, 'AI returned invalid JSON for code changes');
-    throw new Error('AI returned invalid JSON for code changes');
+    // AI often outputs literal newlines/tabs inside JSON string values — repair and retry
+    try {
+      changes = JSON.parse(repairJsonStrings(cleaned)) as CodeChange[];
+      logger.warn('AI response required JSON repair (unescaped control chars in strings)');
+    } catch {
+      logger.error({ raw: cleaned.slice(0, 500) }, 'AI returned invalid JSON for code changes');
+      throw new Error('AI returned invalid JSON for code changes');
+    }
   }
 
   if (!Array.isArray(changes) || changes.length === 0) {

@@ -20,6 +20,11 @@ Guidelines:
 - If the request mentions "문서", "README", "가이드" → type is "docs".
 - If the request mentions "테스트", "테스트 코드" → type is "test".
 - Priority: "긴급", "ASAP", "급함" → high; default → medium; "여유", "나중에" → low.
+- When conversation history is provided (multi-turn follow-up), synthesize ALL messages to understand the full intent.
+  - Treat follow-up answers as clarifications that RESOLVE missingInfo items.
+  - If the user explicitly says to proceed (e.g., "그냥 진행", "없어", "진행해줘"), set confidence >= 0.8 and missingInfo to null.
+  - Do NOT repeat the same missingInfo items that were already answered in the conversation.
+- The description field should incorporate details gathered from the entire conversation, not just the original message.
 - Always respond with valid JSON only. No markdown, no explanation.`;
 
 export const FOLLOW_UP_SYSTEM_PROMPT = `You are an AI assistant helping to clarify a task request in a Slack thread.

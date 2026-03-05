@@ -28,6 +28,7 @@ vi.mock('../services/state.service.js', () => ({
 
 vi.mock('../services/slack-notifier.service.js', () => ({
   notify: vi.fn(),
+  updateNotification: vi.fn(),
 }));
 
 vi.mock('../slack/blocks.js', () => ({
@@ -68,7 +69,7 @@ vi.mock('./steps/create-pr.js', () => ({
 import { createLogger } from '../lib/logger.js';
 import { pipelineDuration, pipelineStepDuration, pipelineTotal } from '../lib/metrics.js';
 import type { TaskJobData } from '../services/queue.service.js';
-import { notify } from '../services/slack-notifier.service.js';
+import { notify, updateNotification } from '../services/slack-notifier.service.js';
 import { getPipelineState, savePipelineState } from '../services/state.service.js';
 import {
   buildPipelineCancelledBlocks,
@@ -86,6 +87,7 @@ import { generateCodeStep } from './steps/generate-code.js';
 const mockSavePipelineState = vi.mocked(savePipelineState);
 const mockGetPipelineState = vi.mocked(getPipelineState);
 const mockNotify = vi.mocked(notify);
+const mockUpdateNotification = vi.mocked(updateNotification);
 const mockCreateIssueStep = vi.mocked(createIssueStep);
 const mockCloneRepoStep = vi.mocked(cloneRepoStep);
 const mockGenerateCodeStep = vi.mocked(generateCodeStep);
@@ -127,6 +129,8 @@ describe('orchestrator', () => {
     );
     // By default, getPipelineState returns null (not cancelled)
     mockGetPipelineState.mockResolvedValue(null);
+    // notify returns a message ts for progress tracking
+    mockNotify.mockResolvedValue('progress-ts-123');
     // Restore block builder mock return values after resetAllMocks
     mockBuildProgressBlocks.mockReturnValue([
       { type: 'section', text: { type: 'mrkdwn', text: 'progress' } },
@@ -140,6 +144,36 @@ describe('orchestrator', () => {
     mockBuildCancelledBlocks.mockReturnValue([
       { type: 'section', text: { type: 'mrkdwn', text: 'cancelled' } },
     ]);
+  });
+
+  it('should pass conversationHistory to pipeline context', async () => {
+    const history = [
+      { role: 'user' as const, content: 'README 업데이트해줘', timestamp: 'ts1' },
+      { role: 'assistant' as const, content: '어떤 내용을 업데이트할까요?', timestamp: 'ts2' },
+      { role: 'user' as const, content: '설치 방법 추가', timestamp: 'ts3' },
+    ];
+    const data = makeJobData({ conversationHistory: history });
+
+    mockCreateIssueStep.mockImplementation(async (ctx) => {
+      expect(ctx.conversationHistory).toEqual(history);
+    });
+
+    await runPipeline('job-1', data);
+
+    expect(mockCreateIssueStep).toHaveBeenCalledOnce();
+  });
+
+  it('should work without conversationHistory (backward compat)', async () => {
+    const data = makeJobData();
+    // No conversationHistory field
+
+    mockCreateIssueStep.mockImplementation(async (ctx) => {
+      expect(ctx.conversationHistory).toBeUndefined();
+    });
+
+    await runPipeline('job-1', data);
+
+    expect(mockCreateIssueStep).toHaveBeenCalledOnce();
   });
 
   it('should throw UnrecoverableError when targetRepo is null', async () => {
@@ -220,18 +254,20 @@ describe('orchestrator', () => {
     expect(lastSaveCall?.error).toBe('GitHub API error');
   });
 
-  it('should send Slack notification with blocks on failure', async () => {
+  it('should update progress message with failure blocks on error', async () => {
     mockCreateIssueStep.mockRejectedValue(new Error('something went wrong'));
 
     await expect(runPipeline('job-1', makeJobData())).rejects.toThrow();
 
-    const failNotify = mockNotify.mock.calls.find((c) => c[2].includes('작업 실패'));
-    expect(failNotify).toBeDefined();
-    expect(failNotify?.[3]).toBeDefined();
+    // First step sends notify (creates progress message), failure updates same message
+    const failUpdate = mockUpdateNotification.mock.calls.find((c) => c[2].includes('작업 실패'));
+    expect(failUpdate).toBeDefined();
+    expect(failUpdate?.[1]).toBe('progress-ts-123');
+    expect(failUpdate?.[3]).toBeDefined();
     expect(mockBuildFailedBlocks).toHaveBeenCalled();
   });
 
-  it('should send completion Slack notification with Block Kit on success', async () => {
+  it('should update progress message with completion blocks on success', async () => {
     mockCreateIssueStep.mockImplementation(async (ctx) => {
       ctx.issueNumber = 5;
       ctx.issueUrl = 'https://issue/5';
@@ -243,9 +279,10 @@ describe('orchestrator', () => {
 
     await runPipeline('job-1', makeJobData());
 
-    const successNotify = mockNotify.mock.calls.find((c) => c[2].includes('작업 완료'));
-    expect(successNotify).toBeDefined();
-    expect(successNotify?.[3]).toBeDefined();
+    const successUpdate = mockUpdateNotification.mock.calls.find((c) => c[2].includes('작업 완료'));
+    expect(successUpdate).toBeDefined();
+    expect(successUpdate?.[1]).toBe('progress-ts-123');
+    expect(successUpdate?.[3]).toBeDefined();
     expect(mockBuildCompletedBlocks).toHaveBeenCalled();
   });
 
@@ -285,23 +322,22 @@ describe('orchestrator', () => {
     expect(stepSnapshots).toContain('create_pr');
   });
 
-  it('should send start notification', async () => {
-    await runPipeline('job-1', makeJobData());
-
-    const startNotify = mockNotify.mock.calls.find((c) => c[2].includes('작업을 시작'));
-    expect(startNotify).toBeDefined();
-  });
-
-  it('should send Block Kit progress notifications for each step', async () => {
+  it('should send first progress as new message and update subsequent steps', async () => {
     await runPipeline('job-1', makeJobData());
 
     // buildPipelineProgressBlocks should have been called once per step (5 steps)
     expect(mockBuildProgressBlocks).toHaveBeenCalledTimes(5);
-    // Each step notify call should include blocks (3rd index = blocks arg)
-    const progressNotifyCalls = mockNotify.mock.calls.filter((c) => c[2].includes('진행 중'));
-    expect(progressNotifyCalls).toHaveLength(5);
-    for (const call of progressNotifyCalls) {
-      expect(call[3]).toBeDefined();
+
+    // First step: notify (new message)
+    const firstProgressCall = mockNotify.mock.calls.find((c) => c[2].includes('진행 중'));
+    expect(firstProgressCall).toBeDefined();
+
+    // 4 progress updates + 1 completion update = 5 total
+    expect(mockUpdateNotification).toHaveBeenCalledTimes(5);
+    for (const call of mockUpdateNotification.mock.calls.filter((c) => c[2].includes('진행 중'))) {
+      expect(call[0]).toBe('C123');
+      expect(call[1]).toBe('progress-ts-123');
+      expect(call[3]).toBeDefined(); // blocks
     }
   });
 
@@ -423,7 +459,7 @@ describe('orchestrator', () => {
       expect(mockCreatePRStep).not.toHaveBeenCalled();
     });
 
-    it('should send cancellation notification with Block Kit blocks when cancelled', async () => {
+    it('should send cancellation notification when cancelled before first step (no progressTs)', async () => {
       const cancelledState = {
         id: 'job-1',
         threadTs: 'ts123',
@@ -441,9 +477,36 @@ describe('orchestrator', () => {
 
       await runPipeline('job-1', makeJobData());
 
+      // No progressTs yet, so should use notify (new message)
       const cancelNotify = mockNotify.mock.calls.find((c) => c[2].includes('취소'));
       expect(cancelNotify).toBeDefined();
       expect(cancelNotify?.[3]).toBeDefined();
+      expect(mockBuildCancelledBlocks).toHaveBeenCalledWith(cancelledState);
+    });
+
+    it('should update progress message when cancelled mid-pipeline', async () => {
+      const cancelledState = {
+        id: 'job-1',
+        threadTs: 'ts123',
+        channelId: 'C123',
+        request: makeJobData().request,
+        status: 'cancelled' as const,
+        cancelledBy: 'U999',
+        cancelledAt: Date.now(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      mockGetPipelineState
+        .mockResolvedValueOnce(null) // before create_issue: not cancelled
+        .mockResolvedValue(cancelledState); // before clone_repo: cancelled
+
+      await runPipeline('job-1', makeJobData());
+
+      // progressTs exists from first step, so should use updateNotification
+      const cancelUpdate = mockUpdateNotification.mock.calls.find((c) => c[2].includes('취소'));
+      expect(cancelUpdate).toBeDefined();
+      expect(cancelUpdate?.[1]).toBe('progress-ts-123');
       expect(mockBuildCancelledBlocks).toHaveBeenCalledWith(cancelledState);
     });
 

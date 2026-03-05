@@ -1,26 +1,25 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../config/index.js', () => ({
-  config: { LOG_LEVEL: 'silent' },
+  config: { LOG_LEVEL: 'silent', GITHUB_REVIEW_TEAM: undefined },
 }));
 
 vi.mock('../../services/github.service.js', () => ({
   createPullRequest: vi.fn(),
   findExistingPR: vi.fn(),
+  addAssignees: vi.fn(),
+  requestReviewers: vi.fn(),
 }));
 
-vi.mock('../../services/slack-notifier.service.js', () => ({
-  notify: vi.fn(),
-}));
-
-import { createPullRequest, findExistingPR } from '../../services/github.service.js';
-import { notify } from '../../services/slack-notifier.service.js';
+import { config } from '../../config/index.js';
+import { addAssignees, createPullRequest, findExistingPR, requestReviewers } from '../../services/github.service.js';
 import type { PipelineContext } from '../types.js';
 import { createPRStep } from './create-pr.js';
 
 const mockFindExistingPR = vi.mocked(findExistingPR);
 const mockCreatePullRequest = vi.mocked(createPullRequest);
-const mockNotify = vi.mocked(notify);
+const mockAddAssignees = vi.mocked(addAssignees);
+const mockRequestReviewers = vi.mocked(requestReviewers);
 
 function makeCtx(overrides?: Partial<PipelineContext>): PipelineContext {
   return {
@@ -49,6 +48,7 @@ function makeCtx(overrides?: Partial<PipelineContext>): PipelineContext {
 describe('createPRStep', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.assign(config, { GITHUB_REVIEW_TEAM: undefined });
   });
 
   it('should throw when repoInfo is missing', async () => {
@@ -98,20 +98,6 @@ describe('createPRStep', () => {
     expect(mockCreatePullRequest).not.toHaveBeenCalled();
   });
 
-  it('should send Slack notification after PR creation', async () => {
-    const ctx = makeCtx();
-    mockFindExistingPR.mockResolvedValue(null);
-    mockCreatePullRequest.mockResolvedValue({
-      number: 77,
-      url: 'https://github.com/owner/repo/pull/77',
-    });
-
-    await createPRStep(ctx);
-
-    expect(mockNotify).toHaveBeenCalledOnce();
-    expect(mockNotify.mock.calls[0][2]).toContain('PR #77');
-  });
-
   it('should include changes summary in PR body', async () => {
     const ctx = makeCtx({
       codeChanges: [
@@ -129,5 +115,80 @@ describe('createPRStep', () => {
     expect(body).toContain('src/b.ts');
     expect(body).toContain('create');
     expect(body).toContain('update');
+  });
+
+  it('should assign PR to the Slack requester when githubUsername is set', async () => {
+    const ctx = makeCtx({ githubUsername: 'github-dev' });
+    mockFindExistingPR.mockResolvedValue(null);
+    mockCreatePullRequest.mockResolvedValue({ number: 99, url: 'https://github.com/owner/repo/pull/99' });
+
+    await createPRStep(ctx);
+
+    expect(mockAddAssignees).toHaveBeenCalledWith({
+      owner: 'owner',
+      repo: 'repo',
+      issueNumber: 99,
+      assignees: ['github-dev'],
+    });
+  });
+
+  it('should not add assignees when githubUsername is not set', async () => {
+    const ctx = makeCtx();
+    mockFindExistingPR.mockResolvedValue(null);
+    mockCreatePullRequest.mockResolvedValue({ number: 99, url: 'https://github.com/owner/repo/pull/99' });
+
+    await createPRStep(ctx);
+
+    expect(mockAddAssignees).not.toHaveBeenCalled();
+  });
+
+  it('should not fail PR creation when assignee request fails', async () => {
+    const ctx = makeCtx({ githubUsername: 'github-dev' });
+    mockFindExistingPR.mockResolvedValue(null);
+    mockCreatePullRequest.mockResolvedValue({ number: 99, url: 'https://github.com/owner/repo/pull/99' });
+    mockAddAssignees.mockRejectedValue(new Error('Not a collaborator'));
+
+    await createPRStep(ctx);
+
+    expect(ctx.prNumber).toBe(99);
+  });
+
+  it('should request team reviewers when GITHUB_REVIEW_TEAM is set', async () => {
+    Object.assign(config, { GITHUB_REVIEW_TEAM: 'backend-team' });
+    const ctx = makeCtx();
+    mockFindExistingPR.mockResolvedValue(null);
+    mockCreatePullRequest.mockResolvedValue({ number: 99, url: 'https://github.com/owner/repo/pull/99' });
+
+    await createPRStep(ctx);
+
+    expect(mockRequestReviewers).toHaveBeenCalledWith({
+      owner: 'owner',
+      repo: 'repo',
+      pullNumber: 99,
+      teamReviewers: ['backend-team'],
+    });
+  });
+
+  it('should not request reviewers when GITHUB_REVIEW_TEAM is not set', async () => {
+    const ctx = makeCtx();
+    mockFindExistingPR.mockResolvedValue(null);
+    mockCreatePullRequest.mockResolvedValue({ number: 99, url: 'https://github.com/owner/repo/pull/99' });
+
+    await createPRStep(ctx);
+
+    expect(mockRequestReviewers).not.toHaveBeenCalled();
+  });
+
+  it('should not fail PR creation when team reviewer request fails', async () => {
+    Object.assign(config, { GITHUB_REVIEW_TEAM: 'nonexistent-team' });
+    const ctx = makeCtx();
+    mockFindExistingPR.mockResolvedValue(null);
+    mockCreatePullRequest.mockResolvedValue({ number: 99, url: 'https://github.com/owner/repo/pull/99' });
+    mockRequestReviewers.mockRejectedValue(new Error('Team not found'));
+
+    await createPRStep(ctx);
+
+    // PR 생성은 성공해야 함
+    expect(ctx.prNumber).toBe(99);
   });
 });

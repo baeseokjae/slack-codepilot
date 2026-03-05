@@ -80,6 +80,36 @@ describe('validateCodeChanges', () => {
     expect(() => validateCodeChanges(changes)).toThrow(/src\/dynamic\.ts/);
   });
 
+  it('.md 파일은 검증 스킵: 문서에 위험 패턴이 있어도 통과', () => {
+    const changes: CodeChange[] = [
+      {
+        filePath: 'README.md',
+        content: 'Set `process.env.SECRET` and avoid `rm -rf /`. Uses `child_process`.',
+        action: 'create',
+      },
+    ];
+
+    expect(() => validateCodeChanges(changes)).not.toThrow();
+  });
+
+  it('.txt, .mdx 등 문서 파일도 검증 스킵', () => {
+    const changes: CodeChange[] = [
+      { filePath: 'NOTES.txt', content: 'eval("example")', action: 'create' },
+      { filePath: 'docs/guide.mdx', content: 'import child_process', action: 'create' },
+      { filePath: 'CHANGELOG', content: 'process.env changes', action: 'create' },
+    ];
+
+    expect(() => validateCodeChanges(changes)).not.toThrow();
+  });
+
+  it('.ts 파일은 여전히 검증됨', () => {
+    const changes: CodeChange[] = [
+      { filePath: 'src/hack.ts', content: 'eval("bad")', action: 'create' },
+    ];
+
+    expect(() => validateCodeChanges(changes)).toThrow(/eval\(\)/);
+  });
+
   it('여러 파일에 위반이 있으면 모든 위반이 에러 메시지에 포함', () => {
     const changes: CodeChange[] = [
       { filePath: 'src/a.ts', content: 'eval("hack")', action: 'create' },

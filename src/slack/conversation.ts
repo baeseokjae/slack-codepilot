@@ -39,7 +39,7 @@ export async function handleNewRequest(
   if (parsed.confidence >= CONFIDENCE_THRESHOLD && !parsed.missingInfo?.length) {
     await saveThreadContext(ctx);
     const pendingId = randomUUID();
-    await savePendingConfirmation(pendingId, { request: parsed, channelId, threadTs, userId });
+    await savePendingConfirmation(pendingId, { request: parsed, conversationHistory: ctx.messages, channelId, threadTs, userId });
     const blocks = buildConfirmationBlocks(parsed, pendingId);
     await sendThreadMessage(app, channelId, threadTs, `새 작업 요청: ${parsed.title}`, blocks);
   } else {
@@ -71,6 +71,7 @@ export async function handleFollowUpReply(
     const pendingId = randomUUID();
     await savePendingConfirmation(pendingId, {
       request: reParsed,
+      conversationHistory: ctx.messages,
       channelId,
       threadTs,
       userId: ctx.userId,
@@ -81,13 +82,20 @@ export async function handleFollowUpReply(
     await saveThreadContext(ctx);
     await askFollowUp(app, ctx);
   } else {
+    // MAX_FOLLOW_UPS 도달 — 현재까지 수집한 정보로 강제 진행
+    const forceRequest = { ...reParsed, confidence: 1.0, missingInfo: null };
+    ctx.parsedRequest = forceRequest;
     await saveThreadContext(ctx);
-    await sendThreadMessage(
-      app,
+    const pendingId = randomUUID();
+    await savePendingConfirmation(pendingId, {
+      request: forceRequest,
+      conversationHistory: ctx.messages,
       channelId,
       threadTs,
-      '충분한 정보를 얻지 못했습니다. 요청을 좀 더 구체적으로 다시 작성해주시겠어요? :pray:',
-    );
+      userId: ctx.userId,
+    });
+    const blocks = buildConfirmationBlocks(forceRequest, pendingId);
+    await sendThreadMessage(app, channelId, threadTs, `새 작업 요청: ${forceRequest.title}`, blocks);
   }
 }
 

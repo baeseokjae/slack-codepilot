@@ -42,6 +42,7 @@ export interface PipelineState {
   prNumber?: number;
   prUrl?: string;
   error?: string;
+  progressTs?: string;
   cancelledBy?: string;
   cancelledAt?: number;
 }
