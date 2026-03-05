@@ -9,7 +9,8 @@ Analyze the user's message and extract the following information as JSON:
   "targetRepo": the target repository name if mentioned, otherwise null,
   "priority": one of "low" | "medium" | "high" (infer from urgency cues),
   "confidence": a number between 0 and 1 indicating how confident you are in understanding the request,
-  "missingInfo": an array of questions about missing information needed to proceed, or null if everything is clear
+  "missingInfo": an array of questions about missing information needed to proceed, or null if everything is clear,
+  "acceptanceCriteria": an array of 2-5 concise, testable acceptance criteria, or null if the task is too vague
 }
 
 Guidelines:
@@ -25,6 +26,7 @@ Guidelines:
   - If the user explicitly says to proceed (e.g., "그냥 진행", "없어", "진행해줘"), set confidence >= 0.8 and missingInfo to null.
   - Do NOT repeat the same missingInfo items that were already answered in the conversation.
 - The description field should incorporate details gathered from the entire conversation, not just the original message.
+- Generate "acceptanceCriteria": 2-5 concise completion criteria derived from the description and conversation. Set null for docs/test type or when the request is too vague.
 - Always respond with valid JSON only. No markdown, no explanation.`;
 
 export const FOLLOW_UP_SYSTEM_PROMPT = `You are an AI assistant helping to clarify a task request in a Slack thread.

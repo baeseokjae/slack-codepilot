@@ -6,6 +6,7 @@ export interface ParsedRequest {
   priority: 'low' | 'medium' | 'high';
   confidence: number;
   missingInfo: string[] | null;
+  acceptanceCriteria?: string[] | null;
 }
 
 export interface ThreadContext {

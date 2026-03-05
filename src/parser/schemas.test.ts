@@ -69,4 +69,25 @@ describe('parsedRequestSchema', () => {
     const result = parsedRequestSchema.safeParse({ type: 'fix' });
     expect(result.success).toBe(false);
   });
+
+  it('should accept acceptanceCriteria as a string array', () => {
+    const result = parsedRequestSchema.safeParse({
+      ...validRequest,
+      acceptanceCriteria: ['User can log in with email and password', 'Error message is shown on invalid credentials'],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should accept acceptanceCriteria as null', () => {
+    const result = parsedRequestSchema.safeParse({
+      ...validRequest,
+      acceptanceCriteria: null,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should accept missing acceptanceCriteria for backward compatibility', () => {
+    const result = parsedRequestSchema.safeParse(validRequest);
+    expect(result.success).toBe(true);
+  });
 });

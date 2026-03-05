@@ -2,8 +2,20 @@ import { config } from '../../config/index.js';
 import { createLogger } from '../../lib/logger.js';
 import { createIssue, resolveRepo, searchGitHubUserByEmail } from '../../services/github.service.js';
 import { getSlackUserEmail } from '../../services/slack-notifier.service.js';
-import type { ParsedRequest } from '../../types/index.js';
+import type { ConversationMessage, ParsedRequest } from '../../types/index.js';
 import type { PipelineContext } from '../types.js';
+
+export interface BuildIssueBodyParams {
+  request: ParsedRequest;
+  userId: string;
+  conversationHistory?: ConversationMessage[];
+  channelId?: string;
+  threadTs?: string;
+}
+
+export function buildSlackPermalink(channelId: string, threadTs: string): string {
+  return `https://slack.com/archives/${channelId}/p${threadTs.replace('.', '')}`;
+}
 
 const logger = createLogger('step:create-issue');
 
@@ -76,7 +88,8 @@ const PRIORITY_DISPLAY: Record<string, string> = {
   low: '🟢 Low',
 };
 
-export function buildIssueBody(request: ParsedRequest, userId: string): string {
+export function buildIssueBody(params: BuildIssueBodyParams): string {
+  const { request, userId, conversationHistory, channelId, threadTs } = params;
   const emoji = TYPE_EMOJI[request.type] || '📋';
   const typeDisplay = TYPE_DISPLAY[request.type] || request.type;
   const priorityDisplay = PRIORITY_DISPLAY[request.priority] || request.priority;
@@ -90,7 +103,14 @@ export function buildIssueBody(request: ParsedRequest, userId: string): string {
   sections.push('### Description');
   sections.push(request.description);
 
+  // Acceptance Criteria (conditional)
+  if (request.acceptanceCriteria?.length) {
+    sections.push('### Acceptance Criteria');
+    sections.push(request.acceptanceCriteria.map((c) => `- [ ] ${c}`).join('\n'));
+  }
+
   // Details table
+  const confidencePercent = Math.round(request.confidence * 100);
   sections.push('### Details');
   sections.push(
     [
@@ -100,13 +120,36 @@ export function buildIssueBody(request: ParsedRequest, userId: string): string {
       `| **Priority** | ${priorityDisplay} |`,
       `| **Repository** | \`${request.targetRepo}\` |`,
       `| **Requested by** | <@${userId}> (via Slack) |`,
+      `| **AI Confidence** | ${confidencePercent}% |`,
     ].join('\n'),
   );
 
+  // Conversation Context (conditional)
+  if (conversationHistory?.length) {
+    const lines = conversationHistory.map((m) => {
+      const role = m.role === 'user' ? 'User' : 'Bot';
+      return `> **${role}**: ${m.content}`;
+    });
+    sections.push(
+      [
+        '<details>',
+        '<summary>💬 Original Conversation</summary>',
+        '',
+        lines.join('\n>\n'),
+        '',
+        '</details>',
+      ].join('\n'),
+    );
+  }
+
   // Footer
   sections.push('---');
+  const slackLink =
+    channelId && threadTs
+      ? ` · [Slack thread](${buildSlackPermalink(channelId, threadTs)})`
+      : '';
   sections.push(
-    '_This issue was automatically created by [CodePilot](https://github.com/slack-codepilot) from a Slack conversation._',
+    `> 🤖 Created by [CodePilot](https://github.com/slack-codepilot)${slackLink}`,
   );
 
   return sections.join('\n\n');
@@ -138,7 +181,13 @@ export async function createIssueStep(ctx: PipelineContext): Promise<void> {
     owner: ctx.repoInfo.owner,
     repo: ctx.repoInfo.repo,
     title: issueTitle,
-    body: buildIssueBody(ctx.request, ctx.userId),
+    body: buildIssueBody({
+      request: ctx.request,
+      userId: ctx.userId,
+      conversationHistory: ctx.conversationHistory,
+      channelId: ctx.channelId,
+      threadTs: ctx.threadTs,
+    }),
     labels: [typeLabel[ctx.request.type] || ctx.request.type, 'codepilot'],
     assignees,
   });

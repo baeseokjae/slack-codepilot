@@ -18,7 +18,7 @@ import { config } from '../../config/index.js';
 import { createIssue, resolveRepo, searchGitHubUserByEmail } from '../../services/github.service.js';
 import { getSlackUserEmail } from '../../services/slack-notifier.service.js';
 import type { PipelineContext } from '../types.js';
-import { _resetUserMapCache, buildIssueBody, createIssueStep } from './create-issue.js';
+import { _resetUserMapCache, buildIssueBody, buildSlackPermalink, createIssueStep } from './create-issue.js';
 
 const mockResolveRepo = vi.mocked(resolveRepo);
 const mockCreateIssue = vi.mocked(createIssue);
@@ -224,8 +224,8 @@ describe('createIssueStep', () => {
 
 describe('buildIssueBody', () => {
   it('should include type emoji, display name, and title in header', () => {
-    const body = buildIssueBody(
-      {
+    const body = buildIssueBody({
+      request: {
         type: 'feature',
         title: '새 기능 추가',
         description: '로그인 기능 구현',
@@ -234,15 +234,15 @@ describe('buildIssueBody', () => {
         confidence: 0.9,
         missingInfo: null,
       },
-      'U123',
-    );
+      userId: 'U123',
+    });
 
     expect(body).toContain('## ✨ Feature Request: 새 기능 추가');
   });
 
   it('should include description section', () => {
-    const body = buildIssueBody(
-      {
+    const body = buildIssueBody({
+      request: {
         type: 'fix',
         title: '버그 수정',
         description: '로그인 시 에러 발생',
@@ -251,16 +251,16 @@ describe('buildIssueBody', () => {
         confidence: 0.9,
         missingInfo: null,
       },
-      'U456',
-    );
+      userId: 'U456',
+    });
 
     expect(body).toContain('### Description');
     expect(body).toContain('로그인 시 에러 발생');
   });
 
   it('should include details table with priority and repo', () => {
-    const body = buildIssueBody(
-      {
+    const body = buildIssueBody({
+      request: {
         type: 'refactor',
         title: '코드 정리',
         description: '레거시 코드 리팩토링',
@@ -269,8 +269,8 @@ describe('buildIssueBody', () => {
         confidence: 0.85,
         missingInfo: null,
       },
-      'U789',
-    );
+      userId: 'U789',
+    });
 
     expect(body).toContain('### Details');
     expect(body).toContain('🟢 Low');
@@ -288,8 +288,8 @@ describe('buildIssueBody', () => {
     ];
 
     for (const { type, emoji } of types) {
-      const body = buildIssueBody(
-        {
+      const body = buildIssueBody({
+        request: {
           type,
           title: 'test',
           description: 'desc',
@@ -298,15 +298,15 @@ describe('buildIssueBody', () => {
           confidence: 0.9,
           missingInfo: null,
         },
-        'U1',
-      );
+        userId: 'U1',
+      });
       expect(body).toContain(emoji);
     }
   });
 
   it('should include CodePilot footer', () => {
-    const body = buildIssueBody(
-      {
+    const body = buildIssueBody({
+      request: {
         type: 'feature',
         title: 'test',
         description: 'desc',
@@ -315,11 +315,178 @@ describe('buildIssueBody', () => {
         confidence: 0.9,
         missingInfo: null,
       },
-      'U1',
-    );
+      userId: 'U1',
+    });
 
-    expect(body).toContain('automatically created by');
     expect(body).toContain('CodePilot');
-    expect(body).toContain('Slack conversation');
+    expect(body).toContain('Created by');
+  });
+
+  it('should render acceptance criteria as checkbox list', () => {
+    const body = buildIssueBody({
+      request: {
+        type: 'feature',
+        title: '로그인 기능',
+        description: '소셜 로그인 구현',
+        targetRepo: 'owner/repo',
+        priority: 'medium',
+        confidence: 0.9,
+        missingInfo: null,
+        acceptanceCriteria: ['이메일로 로그인 가능', '비밀번호 오류 시 메시지 표시'],
+      },
+      userId: 'U1',
+    });
+
+    expect(body).toContain('### Acceptance Criteria');
+    expect(body).toContain('- [ ] 이메일로 로그인 가능');
+    expect(body).toContain('- [ ] 비밀번호 오류 시 메시지 표시');
+  });
+
+  it('should omit acceptance criteria section when null', () => {
+    const body = buildIssueBody({
+      request: {
+        type: 'feature',
+        title: 'test',
+        description: 'desc',
+        targetRepo: 'o/r',
+        priority: 'medium',
+        confidence: 0.9,
+        missingInfo: null,
+        acceptanceCriteria: null,
+      },
+      userId: 'U1',
+    });
+
+    expect(body).not.toContain('### Acceptance Criteria');
+  });
+
+  it('should omit acceptance criteria section when undefined', () => {
+    const body = buildIssueBody({
+      request: {
+        type: 'feature',
+        title: 'test',
+        description: 'desc',
+        targetRepo: 'o/r',
+        priority: 'medium',
+        confidence: 0.9,
+        missingInfo: null,
+      },
+      userId: 'U1',
+    });
+
+    expect(body).not.toContain('### Acceptance Criteria');
+  });
+
+  it('should show AI confidence as percentage in details table', () => {
+    const body = buildIssueBody({
+      request: {
+        type: 'feature',
+        title: 'test',
+        description: 'desc',
+        targetRepo: 'o/r',
+        priority: 'medium',
+        confidence: 0.92,
+        missingInfo: null,
+      },
+      userId: 'U1',
+    });
+
+    expect(body).toContain('**AI Confidence**');
+    expect(body).toContain('92%');
+  });
+
+  it('should render conversation history in details block', () => {
+    const body = buildIssueBody({
+      request: {
+        type: 'feature',
+        title: 'test',
+        description: 'desc',
+        targetRepo: 'o/r',
+        priority: 'medium',
+        confidence: 0.9,
+        missingInfo: null,
+      },
+      userId: 'U1',
+      conversationHistory: [
+        { role: 'user', content: '로그인 기능 추가해줘', timestamp: '1000' },
+        { role: 'assistant', content: '어떤 방식의 로그인인가요?', timestamp: '1001' },
+      ],
+    });
+
+    expect(body).toContain('<details>');
+    expect(body).toContain('💬 Original Conversation');
+    expect(body).toContain('> **User**: 로그인 기능 추가해줘');
+    expect(body).toContain('> **Bot**: 어떤 방식의 로그인인가요?');
+    expect(body).toContain('</details>');
+  });
+
+  it('should omit conversation history block when absent', () => {
+    const body = buildIssueBody({
+      request: {
+        type: 'feature',
+        title: 'test',
+        description: 'desc',
+        targetRepo: 'o/r',
+        priority: 'medium',
+        confidence: 0.9,
+        missingInfo: null,
+      },
+      userId: 'U1',
+    });
+
+    expect(body).not.toContain('<details>');
+    expect(body).not.toContain('Original Conversation');
+  });
+
+  it('should include Slack permalink in footer when channelId and threadTs are provided', () => {
+    const body = buildIssueBody({
+      request: {
+        type: 'feature',
+        title: 'test',
+        description: 'desc',
+        targetRepo: 'o/r',
+        priority: 'medium',
+        confidence: 0.9,
+        missingInfo: null,
+      },
+      userId: 'U1',
+      channelId: 'C123ABC',
+      threadTs: '1234567890.123456',
+    });
+
+    expect(body).toContain('[Slack thread]');
+    expect(body).toContain('https://slack.com/archives/C123ABC/p1234567890123456');
+  });
+
+  it('should omit Slack permalink from footer when channelId/threadTs are absent', () => {
+    const body = buildIssueBody({
+      request: {
+        type: 'feature',
+        title: 'test',
+        description: 'desc',
+        targetRepo: 'o/r',
+        priority: 'medium',
+        confidence: 0.9,
+        missingInfo: null,
+      },
+      userId: 'U1',
+    });
+
+    expect(body).not.toContain('[Slack thread]');
+    expect(body).not.toContain('slack.com/archives');
+  });
+});
+
+describe('buildSlackPermalink', () => {
+  it('should remove the dot from threadTs and build the correct archive URL', () => {
+    expect(buildSlackPermalink('C123ABC', '1234567890.123456')).toBe(
+      'https://slack.com/archives/C123ABC/p1234567890123456',
+    );
+  });
+
+  it('should handle threadTs without a dot', () => {
+    expect(buildSlackPermalink('CXYZ', '9876543210')).toBe(
+      'https://slack.com/archives/CXYZ/p9876543210',
+    );
   });
 });
