@@ -25,7 +25,8 @@ const statusEmoji: Record<PipelineState['status'], string> = {
 };
 
 const PIPELINE_STEPS: { name: PipelineStep; label: string }[] = [
-  { name: 'create_issue', label: 'Issue 생성' },
+  { name: 'create_notion_issue', label: 'Notion Issue 생성' },
+  { name: 'create_issue', label: 'GitHub Issue 생성' },
   { name: 'clone_repo', label: '저장소 클론' },
   { name: 'generate_code', label: '코드 생성' },
   { name: 'apply_and_push', label: '커밋 & 푸시' },
@@ -168,6 +169,10 @@ export function buildPipelineCompletedBlocks(state: PipelineState): KnownBlock[]
         ? `PR #${state.prNumber}`
         : 'PR 없음';
 
+  const notionPart = state.notionPageUrl
+    ? `\n:notebook_with_decorative_cover: <${state.notionPageUrl}|Notion>`
+    : '';
+
   let timingsText = '';
   if (state.stepTimings) {
     const entries = Object.entries(state.stepTimings);
@@ -182,7 +187,7 @@ export function buildPipelineCompletedBlocks(state: PipelineState): KnownBlock[]
       type: 'section',
       text: {
         type: 'mrkdwn',
-        text: `:white_check_mark: *작업이 완료되었습니다!*\n\n:ticket: ${issuePart}\n:merged: ${prPart}\n\nPR을 리뷰하고 머지해주세요!${timingsText}`,
+        text: `:white_check_mark: *작업이 완료되었습니다!*\n\n:ticket: ${issuePart}\n:merged: ${prPart}${notionPart}\n\nPR을 리뷰하고 머지해주세요!${timingsText}`,
       },
     },
   ];

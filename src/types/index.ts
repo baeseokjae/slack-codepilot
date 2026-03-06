@@ -42,6 +42,7 @@ export interface PipelineState {
   branchName?: string;
   prNumber?: number;
   prUrl?: string;
+  notionPageUrl?: string;
   error?: string;
   progressTs?: string;
   cancelledBy?: string;
@@ -49,6 +50,7 @@ export interface PipelineState {
 }
 
 export type PipelineStep =
+  | 'create_notion_issue'
   | 'create_issue'
   | 'clone_repo'
   | 'generate_code'

@@ -1,6 +1,7 @@
 import { config } from '../../config/index.js';
 import { createLogger } from '../../lib/logger.js';
 import { addAssignees, createPullRequest, findExistingPR, requestReviewers } from '../../services/github.service.js';
+import { updateNotionIssueWithPR } from '../../services/notion.service.js';
 import type { PipelineContext } from '../types.js';
 
 const logger = createLogger('step:create-pr');
@@ -63,4 +64,11 @@ export async function createPRStep(ctx: PipelineContext): Promise<void> {
     }
   }
 
+  if (ctx.notionPageId && ctx.prUrl) {
+    try {
+      await updateNotionIssueWithPR(ctx.notionPageId, ctx.prUrl);
+    } catch (err) {
+      logger.warn({ err, notionPageId: ctx.notionPageId }, 'Failed to update Notion with PR link');
+    }
+  }
 }

@@ -25,6 +25,8 @@ const envSchema = z
     GITHUB_DEFAULT_ORG: z.string().min(1).optional(),
     GITHUB_REVIEW_TEAM: z.string().min(1).optional(),
     SLACK_GITHUB_USER_MAP: z.string().optional(),
+    NOTION_API_KEY: z.string().optional(),
+    NOTION_ISSUE_DATABASE_ID: z.string().optional(),
     GIT_WORKSPACE_DIR: z.string().default('/tmp/codepilot-workspaces'),
     CODE_GEN_MAX_TOKENS: z.coerce.number().default(8192),
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().default(30000),

@@ -17,11 +17,13 @@ import type { PipelineState, PipelineStep } from '../types/index.js';
 import { applyAndPushStep } from './steps/apply-and-push.js';
 import { cloneRepoStep } from './steps/clone-repo.js';
 import { createIssueStep } from './steps/create-issue.js';
+import { createNotionIssueStep } from './steps/create-notion-issue.js';
 import { createPRStep } from './steps/create-pr.js';
 import { generateCodeStep } from './steps/generate-code.js';
 import type { PipelineContext } from './types.js';
 
 const STEPS: { name: PipelineStep; handler: (ctx: PipelineContext) => Promise<void> }[] = [
+  { name: 'create_notion_issue', handler: createNotionIssueStep },
   { name: 'create_issue', handler: createIssueStep },
   { name: 'clone_repo', handler: cloneRepoStep },
   { name: 'generate_code', handler: generateCodeStep },
@@ -124,6 +126,7 @@ export async function runPipeline(jobId: string, data: TaskJobData): Promise<voi
     state.status = 'completed';
     state.issueNumber = ctx.issueNumber;
     state.issueUrl = ctx.issueUrl;
+    state.notionPageUrl = ctx.notionPageUrl;
     state.branchName = ctx.branchName;
     state.prNumber = ctx.prNumber;
     state.prUrl = ctx.prUrl;

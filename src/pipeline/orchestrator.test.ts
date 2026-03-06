@@ -46,6 +46,10 @@ vi.mock('../slack/blocks.js', () => ({
     .mockReturnValue([{ type: 'section', text: { type: 'mrkdwn', text: 'cancelled' } }]),
 }));
 
+vi.mock('./steps/create-notion-issue.js', () => ({
+  createNotionIssueStep: vi.fn(),
+}));
+
 vi.mock('./steps/create-issue.js', () => ({
   createIssueStep: vi.fn(),
 }));
@@ -81,6 +85,7 @@ import { runPipeline } from './orchestrator.js';
 import { applyAndPushStep } from './steps/apply-and-push.js';
 import { cloneRepoStep } from './steps/clone-repo.js';
 import { createIssueStep } from './steps/create-issue.js';
+import { createNotionIssueStep } from './steps/create-notion-issue.js';
 import { createPRStep } from './steps/create-pr.js';
 import { generateCodeStep } from './steps/generate-code.js';
 
@@ -88,6 +93,7 @@ const mockSavePipelineState = vi.mocked(savePipelineState);
 const mockGetPipelineState = vi.mocked(getPipelineState);
 const mockNotify = vi.mocked(notify);
 const mockUpdateNotification = vi.mocked(updateNotification);
+const mockCreateNotionIssueStep = vi.mocked(createNotionIssueStep);
 const mockCreateIssueStep = vi.mocked(createIssueStep);
 const mockCloneRepoStep = vi.mocked(cloneRepoStep);
 const mockGenerateCodeStep = vi.mocked(generateCodeStep);
@@ -192,8 +198,11 @@ describe('orchestrator', () => {
     await expect(runPipeline('job-1', data)).rejects.toThrow(UnrecoverableError);
   });
 
-  it('should execute all 5 steps in order on success', async () => {
+  it('should execute all 6 steps in order on success', async () => {
     const callOrder: string[] = [];
+    mockCreateNotionIssueStep.mockImplementation(async () => {
+      callOrder.push('create_notion_issue');
+    });
     mockCreateIssueStep.mockImplementation(async (ctx) => {
       callOrder.push('create_issue');
       ctx.issueNumber = 1;
@@ -218,6 +227,7 @@ describe('orchestrator', () => {
     await runPipeline('job-1', makeJobData());
 
     expect(callOrder).toEqual([
+      'create_notion_issue',
       'create_issue',
       'clone_repo',
       'generate_code',
@@ -315,6 +325,7 @@ describe('orchestrator', () => {
 
     await runPipeline('job-1', makeJobData());
 
+    expect(stepSnapshots).toContain('create_notion_issue');
     expect(stepSnapshots).toContain('create_issue');
     expect(stepSnapshots).toContain('clone_repo');
     expect(stepSnapshots).toContain('generate_code');
@@ -325,15 +336,15 @@ describe('orchestrator', () => {
   it('should send first progress as new message and update subsequent steps', async () => {
     await runPipeline('job-1', makeJobData());
 
-    // buildPipelineProgressBlocks should have been called once per step (5 steps)
-    expect(mockBuildProgressBlocks).toHaveBeenCalledTimes(5);
+    // buildPipelineProgressBlocks should have been called once per step (6 steps)
+    expect(mockBuildProgressBlocks).toHaveBeenCalledTimes(6);
 
     // First step: notify (new message)
     const firstProgressCall = mockNotify.mock.calls.find((c) => c[2].includes('진행 중'));
     expect(firstProgressCall).toBeDefined();
 
-    // 4 progress updates + 1 completion update = 5 total
-    expect(mockUpdateNotification).toHaveBeenCalledTimes(5);
+    // 5 progress updates + 1 completion update = 6 total
+    expect(mockUpdateNotification).toHaveBeenCalledTimes(6);
     for (const call of mockUpdateNotification.mock.calls.filter((c) => c[2].includes('진행 중'))) {
       expect(call[0]).toBe('C123');
       expect(call[1]).toBe('progress-ts-123');
@@ -359,7 +370,11 @@ describe('orchestrator', () => {
     it('should call pipelineStepDuration.observe for each completed step', async () => {
       await runPipeline('job-1', makeJobData());
 
-      expect(mockPipelineStepDuration.observe).toHaveBeenCalledTimes(5);
+      expect(mockPipelineStepDuration.observe).toHaveBeenCalledTimes(6);
+      expect(mockPipelineStepDuration.observe).toHaveBeenCalledWith(
+        { step: 'create_notion_issue' },
+        expect.any(Number),
+      );
       expect(mockPipelineStepDuration.observe).toHaveBeenCalledWith(
         { step: 'create_issue' },
         expect.any(Number),
@@ -419,6 +434,7 @@ describe('orchestrator', () => {
 
       const lastCall = mockSavePipelineState.mock.calls.at(-1)?.[0];
       expect(lastCall?.stepTimings).toBeDefined();
+      expect(lastCall?.stepTimings).toHaveProperty('create_notion_issue');
       expect(lastCall?.stepTimings).toHaveProperty('create_issue');
       expect(lastCall?.stepTimings).toHaveProperty('clone_repo');
       expect(lastCall?.stepTimings).toHaveProperty('generate_code');
@@ -430,12 +446,16 @@ describe('orchestrator', () => {
   describe('cancellation', () => {
     it('should stop execution when pipeline is cancelled before a step', async () => {
       const callOrder: string[] = [];
+      mockCreateNotionIssueStep.mockImplementation(async () => {
+        callOrder.push('create_notion_issue');
+      });
       mockCreateIssueStep.mockImplementation(async () => {
         callOrder.push('create_issue');
       });
 
-      // Return cancelled state before the second step (clone_repo)
+      // Return cancelled state before the third step (clone_repo)
       mockGetPipelineState
+        .mockResolvedValueOnce(null) // before create_notion_issue: not cancelled
         .mockResolvedValueOnce(null) // before create_issue: not cancelled
         .mockResolvedValueOnce({
           id: 'job-1',
@@ -451,8 +471,8 @@ describe('orchestrator', () => {
 
       await runPipeline('job-1', makeJobData());
 
-      // Only create_issue should have run, clone_repo should not
-      expect(callOrder).toEqual(['create_issue']);
+      // Only create_notion_issue and create_issue should have run
+      expect(callOrder).toEqual(['create_notion_issue', 'create_issue']);
       expect(mockCloneRepoStep).not.toHaveBeenCalled();
       expect(mockGenerateCodeStep).not.toHaveBeenCalled();
       expect(mockApplyAndPushStep).not.toHaveBeenCalled();
@@ -498,8 +518,8 @@ describe('orchestrator', () => {
       };
 
       mockGetPipelineState
-        .mockResolvedValueOnce(null) // before create_issue: not cancelled
-        .mockResolvedValue(cancelledState); // before clone_repo: cancelled
+        .mockResolvedValueOnce(null) // before create_notion_issue: not cancelled
+        .mockResolvedValue(cancelledState); // before create_issue: cancelled
 
       await runPipeline('job-1', makeJobData());
 
@@ -527,18 +547,19 @@ describe('orchestrator', () => {
 
       await runPipeline('job-1', makeJobData());
 
+      expect(mockCreateNotionIssueStep).not.toHaveBeenCalled();
       expect(mockCreateIssueStep).not.toHaveBeenCalled();
       expect(mockCloneRepoStep).not.toHaveBeenCalled();
     });
 
     it('should clean up workspace when cancelled mid-pipeline', async () => {
       let tmpDir: string | undefined;
-      mockCreateIssueStep.mockImplementation(async (ctx) => {
+      mockCreateNotionIssueStep.mockImplementation(async (ctx) => {
         tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codepilot-cancel-'));
         ctx.workspacePath = tmpDir;
       });
 
-      // Not cancelled before create_issue, cancelled before clone_repo
+      // Not cancelled before create_notion_issue, cancelled before create_issue
       mockGetPipelineState.mockResolvedValueOnce(null).mockResolvedValueOnce({
         id: 'job-1',
         threadTs: 'ts123',

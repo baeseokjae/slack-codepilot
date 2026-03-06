@@ -1,6 +1,7 @@
 import { config } from '../../config/index.js';
 import { createLogger } from '../../lib/logger.js';
 import { createIssue, resolveRepo, searchGitHubUserByEmail } from '../../services/github.service.js';
+import { updateNotionIssueWithGitHub } from '../../services/notion.service.js';
 import { getSlackUserEmail } from '../../services/slack-notifier.service.js';
 import type { ConversationMessage, ParsedRequest } from '../../types/index.js';
 import type { PipelineContext } from '../types.js';
@@ -11,6 +12,7 @@ export interface BuildIssueBodyParams {
   conversationHistory?: ConversationMessage[];
   channelId?: string;
   threadTs?: string;
+  notionPageUrl?: string;
 }
 
 export function buildSlackPermalink(channelId: string, threadTs: string): string {
@@ -89,7 +91,7 @@ const PRIORITY_DISPLAY: Record<string, string> = {
 };
 
 export function buildIssueBody(params: BuildIssueBodyParams): string {
-  const { request, userId, conversationHistory, channelId, threadTs } = params;
+  const { request, userId, conversationHistory, channelId, threadTs, notionPageUrl } = params;
   const emoji = TYPE_EMOJI[request.type] || '📋';
   const typeDisplay = TYPE_DISPLAY[request.type] || request.type;
   const priorityDisplay = PRIORITY_DISPLAY[request.priority] || request.priority;
@@ -148,8 +150,9 @@ export function buildIssueBody(params: BuildIssueBodyParams): string {
     channelId && threadTs
       ? ` · [Slack thread](${buildSlackPermalink(channelId, threadTs)})`
       : '';
+  const notionLink = notionPageUrl ? ` · [Notion](${notionPageUrl})` : '';
   sections.push(
-    `> 🤖 Created by [CodePilot](https://github.com/slack-codepilot)${slackLink}`,
+    `> 🤖 Created by [CodePilot](https://github.com/slack-codepilot)${slackLink}${notionLink}`,
   );
 
   return sections.join('\n\n');
@@ -187,6 +190,7 @@ export async function createIssueStep(ctx: PipelineContext): Promise<void> {
       conversationHistory: ctx.conversationHistory,
       channelId: ctx.channelId,
       threadTs: ctx.threadTs,
+      notionPageUrl: ctx.notionPageUrl,
     }),
     labels: [typeLabel[ctx.request.type] || ctx.request.type, 'codepilot'],
     assignees,
@@ -194,4 +198,12 @@ export async function createIssueStep(ctx: PipelineContext): Promise<void> {
 
   ctx.issueNumber = issue.number;
   ctx.issueUrl = issue.url;
+
+  if (ctx.notionPageId && ctx.issueUrl) {
+    try {
+      await updateNotionIssueWithGitHub(ctx.notionPageId, ctx.issueUrl);
+    } catch (err) {
+      logger.warn({ err, notionPageId: ctx.notionPageId }, 'Failed to update Notion with GitHub issue link');
+    }
+  }
 }

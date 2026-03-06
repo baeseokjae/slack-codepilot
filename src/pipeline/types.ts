@@ -15,6 +15,8 @@ export interface PipelineContext {
   workspacePath?: string;
   codeChanges?: CodeChange[];
   githubUsername?: string;
+  notionPageId?: string;
+  notionPageUrl?: string;
   prNumber?: number;
   prUrl?: string;
 }
