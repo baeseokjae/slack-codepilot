@@ -8,7 +8,6 @@ describe('parsedRequestSchema', () => {
     description: '로그인 시 500 에러가 발생하는 문제',
     targetRepo: 'my-app',
     priority: 'high',
-    confidence: 0.95,
     missingInfo: null,
   };
 
@@ -36,16 +35,6 @@ describe('parsedRequestSchema', () => {
     }
   });
 
-  it('should reject confidence below 0', () => {
-    const result = parsedRequestSchema.safeParse({ ...validRequest, confidence: -0.1 });
-    expect(result.success).toBe(false);
-  });
-
-  it('should reject confidence above 1', () => {
-    const result = parsedRequestSchema.safeParse({ ...validRequest, confidence: 1.1 });
-    expect(result.success).toBe(false);
-  });
-
   it('should accept null targetRepo', () => {
     const result = parsedRequestSchema.safeParse({ ...validRequest, targetRepo: null });
     expect(result.success).toBe(true);
@@ -54,7 +43,6 @@ describe('parsedRequestSchema', () => {
   it('should accept missingInfo array', () => {
     const result = parsedRequestSchema.safeParse({
       ...validRequest,
-      confidence: 0.4,
       missingInfo: ['어떤 레포인지', '재현 단계가 어떻게 되는지'],
     });
     expect(result.success).toBe(true);
