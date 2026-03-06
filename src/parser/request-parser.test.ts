@@ -32,7 +32,6 @@ describe('parseRequest', () => {
         description: '로그인 시 500 에러',
         targetRepo: null,
         priority: 'high',
-        confidence: 0.9,
         missingInfo: null,
       }),
     );
@@ -41,42 +40,38 @@ describe('parseRequest', () => {
 
     expect(result.type).toBe('fix');
     expect(result.title).toBe('로그인 버그 수정');
-    expect(result.confidence).toBe(0.9);
     expect(mockChatCompletion).toHaveBeenCalledOnce();
   });
 
   it('should strip markdown code fences from AI response', async () => {
     mockChatCompletion.mockResolvedValue(
-      '```json\n' +
+      '\n' +
         JSON.stringify({
           type: 'feature',
           title: '새 기능',
           description: '새 기능 추가',
           targetRepo: null,
           priority: 'medium',
-          confidence: 0.8,
           missingInfo: null,
         }) +
-        '\n```',
+        '\n',
     );
 
     const result = await parseRequest('새 기능 추가해줘');
     expect(result.type).toBe('feature');
   });
 
-  it('should return low-confidence fallback on invalid JSON from AI', async () => {
+  it('should return fallback on invalid JSON from AI', async () => {
     mockChatCompletion.mockResolvedValue('this is not json at all');
 
     const result = await parseRequest('뭔가 해줘');
-    expect(result.confidence).toBe(0.3);
     expect(result.missingInfo).toBeTruthy();
   });
 
-  it('should return low-confidence fallback on valid JSON but invalid schema', async () => {
+  it('should return fallback on valid JSON but invalid schema', async () => {
     mockChatCompletion.mockResolvedValue(JSON.stringify({ type: 'unknown', title: 'test' }));
 
     const result = await parseRequest('뭔가 해줘');
-    expect(result.confidence).toBe(0.3);
     expect(result.missingInfo).toBeTruthy();
   });
 
@@ -88,7 +83,6 @@ describe('parseRequest', () => {
         description: '비밀번호 입력 시 에러',
         targetRepo: 'auth-service',
         priority: 'high',
-        confidence: 0.95,
         missingInfo: null,
       }),
     );
@@ -116,7 +110,6 @@ describe('parseRequest', () => {
         description: '버그',
         targetRepo: null,
         priority: 'medium',
-        confidence: 0.9,
         missingInfo: null,
       }),
     );

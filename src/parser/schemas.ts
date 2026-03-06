@@ -6,7 +6,6 @@ export const parsedRequestSchema = z.object({
   description: z.string().min(1),
   targetRepo: z.string().nullable(),
   priority: z.enum(['low', 'medium', 'high']),
-  confidence: z.number().min(0).max(1),
   missingInfo: z.array(z.string()).nullable(),
   acceptanceCriteria: z.array(z.string()).nullable().optional(),
 });
