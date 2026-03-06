@@ -412,7 +412,8 @@ describe('orchestrator', () => {
     });
 
     it('should call pipelineTotal.inc with status cancelled on cancellation', async () => {
-      mockGetPipelineState.mockResolvedValue({
+      // Initial check: not cancelled; first step loop check: cancelled
+      mockGetPipelineState.mockResolvedValueOnce(null).mockResolvedValue({
         id: 'job-1',
         threadTs: 'ts123',
         channelId: 'C123',
@@ -455,6 +456,7 @@ describe('orchestrator', () => {
 
       // Return cancelled state before the third step (clone_repo)
       mockGetPipelineState
+        .mockResolvedValueOnce(null) // initial check: not cancelled
         .mockResolvedValueOnce(null) // before create_notion_issue: not cancelled
         .mockResolvedValueOnce(null) // before create_issue: not cancelled
         .mockResolvedValueOnce({
@@ -479,6 +481,31 @@ describe('orchestrator', () => {
       expect(mockCreatePRStep).not.toHaveBeenCalled();
     });
 
+    it('should return early without notification when already cancelled (retry scenario)', async () => {
+      const cancelledState = {
+        id: 'job-1',
+        threadTs: 'ts123',
+        channelId: 'C123',
+        request: makeJobData().request,
+        status: 'cancelled' as const,
+        cancelledBy: 'U999',
+        cancelledAt: Date.now(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      // Initial check returns cancelled (retry after cancel)
+      mockGetPipelineState.mockResolvedValue(cancelledState);
+
+      await runPipeline('job-1', makeJobData());
+
+      // Should return immediately without any notification or step execution
+      expect(mockNotify).not.toHaveBeenCalled();
+      expect(mockUpdateNotification).not.toHaveBeenCalled();
+      expect(mockCreateNotionIssueStep).not.toHaveBeenCalled();
+      expect(mockPipelineTotal.inc).toHaveBeenCalledWith({ status: 'cancelled' });
+    });
+
     it('should send cancellation notification when cancelled before first step (no progressTs)', async () => {
       const cancelledState = {
         id: 'job-1',
@@ -492,8 +519,10 @@ describe('orchestrator', () => {
         updatedAt: Date.now(),
       };
 
-      // Return cancelled immediately on first check (before create_issue)
-      mockGetPipelineState.mockResolvedValue(cancelledState);
+      // Initial check: not cancelled; first step loop check: cancelled
+      mockGetPipelineState
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue(cancelledState);
 
       await runPipeline('job-1', makeJobData());
 
@@ -518,6 +547,7 @@ describe('orchestrator', () => {
       };
 
       mockGetPipelineState
+        .mockResolvedValueOnce(null) // initial check: not cancelled
         .mockResolvedValueOnce(null) // before create_notion_issue: not cancelled
         .mockResolvedValue(cancelledState); // before create_issue: cancelled
 
@@ -543,7 +573,10 @@ describe('orchestrator', () => {
         updatedAt: Date.now(),
       };
 
-      mockGetPipelineState.mockResolvedValue(cancelledState);
+      // Initial check: not cancelled; first step loop check: cancelled
+      mockGetPipelineState
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue(cancelledState);
 
       await runPipeline('job-1', makeJobData());
 
@@ -559,8 +592,8 @@ describe('orchestrator', () => {
         ctx.workspacePath = tmpDir;
       });
 
-      // Not cancelled before create_notion_issue, cancelled before create_issue
-      mockGetPipelineState.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      // Initial check: not cancelled; not cancelled before create_notion_issue; cancelled before create_issue
+      mockGetPipelineState.mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce({
         id: 'job-1',
         threadTs: 'ts123',
         channelId: 'C123',
@@ -582,7 +615,8 @@ describe('orchestrator', () => {
     });
 
     it('should not throw when cancellation occurs (return cleanly)', async () => {
-      mockGetPipelineState.mockResolvedValue({
+      // Initial check: not cancelled; first step loop check: cancelled
+      mockGetPipelineState.mockResolvedValueOnce(null).mockResolvedValue({
         id: 'job-1',
         threadTs: 'ts123',
         channelId: 'C123',

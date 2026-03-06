@@ -20,6 +20,12 @@ const mockQueue = vi.hoisted(() => ({
 
 vi.mock('bullmq', () => ({
   Queue: vi.fn(() => mockQueue),
+  UnrecoverableError: class UnrecoverableError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'UnrecoverableError';
+    }
+  },
 }));
 
 import { cancelJob, getJob } from './queue.service.js';
@@ -142,7 +148,11 @@ describe('cancelJob', () => {
     const result = await cancelJob('job-1', 'user cancelled');
 
     expect(result).toBe(true);
-    expect(mockJob.moveToFailed).toHaveBeenCalledWith(new Error('user cancelled'), 'token-1', true);
+    expect(mockJob.moveToFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'user cancelled', name: 'UnrecoverableError' }),
+      'token-1',
+      true,
+    );
     expect(mockJob.remove).not.toHaveBeenCalled();
   });
 
@@ -155,6 +165,10 @@ describe('cancelJob', () => {
     const result = await cancelJob('job-1', 'cancelled');
 
     expect(result).toBe(true);
-    expect(mockJob.moveToFailed).toHaveBeenCalledWith(new Error('cancelled'), '0', true);
+    expect(mockJob.moveToFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'cancelled', name: 'UnrecoverableError' }),
+      '0',
+      true,
+    );
   });
 });

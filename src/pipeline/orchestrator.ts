@@ -51,13 +51,21 @@ export async function runPipeline(jobId: string, data: TaskJobData): Promise<voi
     conversationHistory,
   };
 
+  // 재시도 시 이미 취소된 파이프라인이면 즉시 종료
+  const existingState = await getPipelineState(jobId);
+  if (existingState?.status === 'cancelled') {
+    log.info({ jobId }, 'Pipeline already cancelled, skipping retry');
+    pipelineTotal.inc({ status: 'cancelled' });
+    return;
+  }
+
   const state: PipelineState = {
     id: jobId,
     threadTs,
     channelId,
     request,
     status: 'in_progress',
-    createdAt: Date.now(),
+    createdAt: existingState?.createdAt ?? Date.now(),
     updatedAt: Date.now(),
   };
 

@@ -1,4 +1,4 @@
-import { type Job, Queue } from 'bullmq';
+import { type Job, Queue, UnrecoverableError } from 'bullmq';
 import { config } from '../config/index.js';
 import { createLogger } from '../lib/logger.js';
 import type { ConversationMessage, ParsedRequest } from '../types/index.js';
@@ -88,8 +88,8 @@ export async function cancelJob(jobId: string, reason: string): Promise<boolean>
     return true;
   }
 
-  // active 상태: moveToFailed로 처리
-  await job.moveToFailed(new Error(reason), job.token ?? '0', true);
-  logger.info({ jobId, reason }, 'Active job moved to failed');
+  // active 상태: UnrecoverableError로 재시도 방지
+  await job.moveToFailed(new UnrecoverableError(reason), job.token ?? '0', true);
+  logger.info({ jobId, reason }, 'Active job cancelled (no retry)');
   return true;
 }
