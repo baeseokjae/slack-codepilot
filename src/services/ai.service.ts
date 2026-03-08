@@ -76,6 +76,9 @@ async function anthropicChatCompletion(
   if (!block || block.type !== 'text') {
     throw new Error('Empty response from AI');
   }
+  if (response.stop_reason === 'max_tokens') {
+    logger.warn('AI response was truncated due to max_tokens limit');
+  }
   return block.text;
 }
 
@@ -157,9 +160,13 @@ export async function chatCompletion(
             max_tokens: options?.maxTokens ?? 2048,
           });
 
-          const result = response.choices[0]?.message?.content;
+          const choice = response.choices[0];
+          const result = choice?.message?.content;
           if (!result) {
             throw new Error('Empty response from AI');
+          }
+          if (choice.finish_reason === 'length') {
+            logger.warn('AI response was truncated due to max_tokens limit');
           }
           return result;
         }),

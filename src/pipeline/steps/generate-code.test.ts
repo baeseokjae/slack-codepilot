@@ -93,8 +93,15 @@ describe('generateCodeStep', () => {
     expect(ctx.codeChanges).toEqual(changes);
   });
 
-  it('should throw on invalid JSON from AI', async () => {
+  it('should throw on truncated AI response', async () => {
     mockChatCompletion.mockResolvedValue('not valid json at all');
+
+    const ctx = makeCtx();
+    await expect(generateCodeStep(ctx)).rejects.toThrow('AI response was truncated');
+  });
+
+  it('should throw on invalid JSON that is not truncated', async () => {
+    mockChatCompletion.mockResolvedValue('[invalid json content]');
 
     const ctx = makeCtx();
     await expect(generateCodeStep(ctx)).rejects.toThrow('AI returned invalid JSON');

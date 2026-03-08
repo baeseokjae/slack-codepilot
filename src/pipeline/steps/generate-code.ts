@@ -155,10 +155,17 @@ export async function generateCodeStep(ctx: PipelineContext): Promise<void> {
     { maxTokens: config.CODE_GEN_MAX_TOKENS, temperature: 0.1 },
   );
 
-  const cleaned = response
+  let cleaned = response
     .replace(/```json\n?/g, '')
     .replace(/```\n?/g, '')
     .trim();
+
+  // AI가 JSON 앞뒤에 설명 텍스트를 포함하는 경우 배열 부분만 추출
+  const firstBracket = cleaned.indexOf('[');
+  const lastBracket = cleaned.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    cleaned = cleaned.slice(firstBracket, lastBracket + 1);
+  }
 
   let changes: CodeChange[];
   try {
@@ -169,8 +176,18 @@ export async function generateCodeStep(ctx: PipelineContext): Promise<void> {
       changes = JSON.parse(repairJsonStrings(cleaned)) as CodeChange[];
       logger.warn('AI response required JSON repair (unescaped control chars in strings)');
     } catch {
-      logger.error({ raw: cleaned.slice(0, 500) }, 'AI returned invalid JSON for code changes');
-      throw new Error('AI returned invalid JSON for code changes');
+      const isTruncated = !cleaned.endsWith(']');
+      logger.error(
+        { raw: cleaned.slice(0, 500), truncated: isTruncated },
+        isTruncated
+          ? 'AI response was truncated (max_tokens too low for this task)'
+          : 'AI returned invalid JSON for code changes',
+      );
+      throw new Error(
+        isTruncated
+          ? 'AI response was truncated — increase CODE_GEN_MAX_TOKENS'
+          : 'AI returned invalid JSON for code changes',
+      );
     }
   }
 

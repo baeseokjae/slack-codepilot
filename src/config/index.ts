@@ -28,7 +28,7 @@ const envSchema = z
     NOTION_API_KEY: z.string().optional(),
     NOTION_ISSUE_DATABASE_ID: z.string().optional(),
     GIT_WORKSPACE_DIR: z.string().default('/tmp/codepilot-workspaces'),
-    CODE_GEN_MAX_TOKENS: z.coerce.number().default(8192),
+    CODE_GEN_MAX_TOKENS: z.coerce.number().default(16384),
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().default(30000),
     THREAD_TTL_SECONDS: z.coerce.number().default(3600),
     PENDING_TTL_SECONDS: z.coerce.number().default(1800),
