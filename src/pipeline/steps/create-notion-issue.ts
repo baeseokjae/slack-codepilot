@@ -1,67 +1,55 @@
+import { Client } from '@notionhq/client';
+import { config } from '../../config/index.js';
 import { createLogger } from '../../lib/logger.js';
-import {
-  buildRepoUrl,
-  createNotionIssue,
-  isNotionConfigured,
-  resolveNotionUserId,
-  updateNotionIssueWithGitHub,
-} from '../../services/notion.service.js';
-import { getSlackUserEmail } from '../../services/slack-notifier.service.js';
-import { buildSlackPermalink } from './create-issue.js';
 import type { PipelineContext } from '../types.js';
 
-const logger = createLogger('step:create-notion-issue');
+const logger = createLogger('create-notion-issue');
 
 export async function createNotionIssueStep(ctx: PipelineContext): Promise<void> {
-  if (!isNotionConfigured()) {
-    logger.info('Notion not configured, skipping step');
+  if (!config.NOTION_API_KEY || !config.NOTION_ISSUE_DATABASE_ID) {
+    logger.warn('Notion integration not configured, skipping Notion issue creation.');
     return;
   }
 
-  if (!ctx.request.targetRepo) {
-    throw new Error('targetRepo is required but was null');
+  const notion = new Client({ auth: config.NOTION_API_KEY });
+  const { request } = ctx;
+
+  logger.info({ title: request.title }, 'Creating Notion issue');
+
+  const properties: Record<string, any> = {
+    Title: {
+      title: [{ type: 'text', text: { content: request.title } }],
+    },
+    Description: {
+      rich_text: [{ type: 'text', text: { content: request.description } }],
+    },
+    Type: {
+      select: { name: request.type },
+    },
+    Priority: {
+      select: { name: request.priority },
+    },
+  };
+
+  if (request.targetRepo) {
+    properties['Target Repo'] = {
+      rich_text: [{ type: 'text', text: { content: request.targetRepo } }],
+    };
   }
 
-  const slackPermalink =
-    ctx.channelId && ctx.threadTs
-      ? buildSlackPermalink(ctx.channelId, ctx.threadTs)
-      : undefined;
-
-  let notionUserId: string | null = null;
-  try {
-    const email = await getSlackUserEmail(ctx.userId);
-    if (email) {
-      notionUserId = await resolveNotionUserId(email);
-    }
-  } catch (err) {
-    logger.warn({ err, userId: ctx.userId }, 'Failed to resolve Notion user');
+  if (request.acceptanceCriteria?.length) {
+    properties['Acceptance Criteria'] = {
+      rich_text: [{ type: 'text', text: { content: request.acceptanceCriteria.join('\n- ') } }],
+    };
   }
 
-  const result = await createNotionIssue({
-    title: `[CodePilot] ${ctx.request.title}`,
-    type: ctx.request.type,
-    priority: ctx.request.priority,
-    description: ctx.request.description,
-    repositoryUrl: buildRepoUrl(ctx.request.targetRepo),
-    notionUserId,
-    slackPermalink,
-    confidence: ctx.request.confidence,
-    acceptanceCriteria: ctx.request.acceptanceCriteria,
-    conversationHistory: ctx.conversationHistory,
+  const response = await notion.pages.create({
+    parent: {
+      database_id: config.NOTION_ISSUE_DATABASE_ID,
+    },
+    properties,
   });
 
-  ctx.notionPageId = result.pageId;
-  ctx.notionPageUrl = result.pageUrl;
-
-  logger.info({ notionPageId: result.pageId, notionPageUrl: result.pageUrl }, 'Notion issue created');
-}
-
-export async function linkGitHubToNotion(ctx: PipelineContext): Promise<void> {
-  if (!ctx.notionPageId || !ctx.issueUrl) return;
-
-  try {
-    await updateNotionIssueWithGitHub(ctx.notionPageId, ctx.issueUrl);
-  } catch (err) {
-    logger.warn({ err, notionPageId: ctx.notionPageId }, 'Failed to update Notion with GitHub link');
-  }
+  ctx.notionPageUrl = response.url;
+  logger.info({ notionPageUrl: response.url }, 'Notion issue created');
 }
