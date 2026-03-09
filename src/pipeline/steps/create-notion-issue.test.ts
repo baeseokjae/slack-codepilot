@@ -1,179 +1,124 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { config } from '../../config/index.js';
+import { NotionService } from '../../services/notion.service.js';
+import type { PipelineContext } from '../types.js';
+import { createNotionIssueStep } from './create-notion-issue.js';
 
-vi.mock('../../lib/logger.js', () => ({
-  createLogger: vi.fn().mockReturnValue({
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  }),
+vi.mock('../../config/index.js', () => ({
+  config: {
+    LOG_LEVEL: 'silent',
+    NOTION_API_KEY: 'test-key',
+    NOTION_ISSUE_DATABASE_ID: 'test-db-id',
+  },
 }));
 
-const mockIsNotionConfigured = vi.fn();
-const mockCreateNotionIssue = vi.fn();
-const mockUpdateNotionIssueWithGitHub = vi.fn();
-const mockBuildRepoUrl = vi.fn();
-const mockResolveNotionUserId = vi.fn();
+const mockCreatePage = vi.fn();
 
 vi.mock('../../services/notion.service.js', () => ({
-  isNotionConfigured: (...args: unknown[]) => mockIsNotionConfigured(...args),
-  createNotionIssue: (...args: unknown[]) => mockCreateNotionIssue(...args),
-  updateNotionIssueWithGitHub: (...args: unknown[]) => mockUpdateNotionIssueWithGitHub(...args),
-  buildRepoUrl: (...args: unknown[]) => mockBuildRepoUrl(...args),
-  resolveNotionUserId: (...args: unknown[]) => mockResolveNotionUserId(...args),
+  NotionService: vi.fn().mockImplementation(() => ({
+    createPage: mockCreatePage,
+  })),
 }));
-
-const mockGetSlackUserEmail = vi.fn();
-
-vi.mock('../../services/slack-notifier.service.js', () => ({
-  getSlackUserEmail: (...args: unknown[]) => mockGetSlackUserEmail(...args),
-}));
-
-import type { PipelineContext } from '../types.js';
-import { createNotionIssueStep, linkGitHubToNotion } from './create-notion-issue.js';
-
-function makeCtx(overrides?: Partial<PipelineContext>): PipelineContext {
-  return {
-    jobId: 'job-1',
-    correlationId: 'corr-1',
-    channelId: 'C123',
-    threadTs: '1234567890.123456',
-    userId: 'U123',
-    request: {
-      type: 'feature',
-      title: 'Test Feature',
-      description: 'Test description',
-      targetRepo: 'owner/repo',
-      priority: 'high',
-      confidence: 0.95,
-      missingInfo: null,
-    },
-    ...overrides,
-  };
-}
 
 describe('createNotionIssueStep', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCreatePage.mockResolvedValue({ url: 'https://notion.so/test-page' });
   });
 
-  it('should skip when Notion is not configured', async () => {
-    mockIsNotionConfigured.mockReturnValue(false);
-    const ctx = makeCtx();
-
-    await createNotionIssueStep(ctx);
-
-    expect(mockCreateNotionIssue).not.toHaveBeenCalled();
-    expect(ctx.notionPageId).toBeUndefined();
-  });
-
-  it('should throw when targetRepo is null', async () => {
-    mockIsNotionConfigured.mockReturnValue(true);
-    const ctx = makeCtx({
+  function makeCtx(overrides?: Partial<PipelineContext>): PipelineContext {
+    return {
+      jobId: 'job-1',
+      correlationId: 'test-correlation-id',
+      channelId: 'C123',
+      threadTs: 'ts123',
+      userId: 'U123',
       request: {
         type: 'feature',
-        title: 'Test',
-        description: 'desc',
-        targetRepo: null,
+        title: 'Test Feature',
+        description: 'Test description',
+        targetRepo: 'owner/repo',
         priority: 'medium',
         confidence: 0.9,
         missingInfo: null,
+        acceptanceCriteria: null,
+      },
+      ...overrides,
+    };
+  }
+
+  it('should create a Notion page with correct properties', async () => {
+    const ctx = makeCtx();
+    await createNotionIssueStep(ctx);
+
+    expect(mockCreatePage).toHaveBeenCalledOnce();
+    const args = mockCreatePage.mock.calls[0][0];
+    expect(args.databaseId).toBe(config.NOTION_ISSUE_DATABASE_ID);
+    expect(args.properties.Name.title[0].text.content).toBe('Test Feature');
+    expect(args.properties.Description.rich_text[0].text.content).toBe('Test description');
+    expect(args.properties.Type.select.name).toBe('feature');
+    expect(args.properties.Priority.select.name).toBe('medium');
+    expect(args.properties.Repository.rich_text[0].text.content).toBe('owner/repo');
+    expect(args.properties.Status.select.name).toBe('Backlog');
+    expect(args.properties).not.toHaveProperty('AI Confidence'); // Assert that AI Confidence is NOT present
+    expect(ctx.notionPageUrl).toBe('https://notion.so/test-page');
+  });
+
+  it('should not create Notion page if Notion API key or database ID is not configured', async () => {
+    // Temporarily override config for this test
+    const originalApiKey = config.NOTION_API_KEY;
+    const originalDbId = config.NOTION_ISSUE_DATABASE_ID;
+    config.NOTION_API_KEY = undefined;
+    config.NOTION_ISSUE_DATABASE_ID = undefined;
+
+    const ctx = makeCtx();
+    await createNotionIssueStep(ctx);
+
+    expect(mockCreatePage).not.toHaveBeenCalled();
+    expect(ctx.notionPageUrl).toBeUndefined();
+
+    // Restore config
+    config.NOTION_API_KEY = originalApiKey;
+    config.NOTION_ISSUE_DATABASE_ID = originalDbId;
+  });
+
+  it('should create Notion page even if targetRepo is null', async () => {
+    const ctx = makeCtx({ request: { ...makeCtx().request, targetRepo: null } });
+    await createNotionIssueStep(ctx);
+
+    expect(mockCreatePage).toHaveBeenCalledOnce();
+    const args = mockCreatePage.mock.calls[0][0];
+    expect(args.properties.Repository.rich_text).toEqual([]);
+    expect(ctx.notionPageUrl).toBe('https://notion.so/test-page');
+  });
+
+  it('should include missingInfo in description if present', async () => {
+    const ctx = makeCtx({
+      request: {
+        ...makeCtx().request,
+        missingInfo: ['repo name', 'acceptance criteria'],
       },
     });
-
-    await expect(createNotionIssueStep(ctx)).rejects.toThrow('targetRepo is required');
-  });
-
-  it('should create a Notion issue with repo URL and Notion user', async () => {
-    mockIsNotionConfigured.mockReturnValue(true);
-    mockBuildRepoUrl.mockReturnValue('https://github.com/owner/repo');
-    mockGetSlackUserEmail.mockResolvedValue('user@example.com');
-    mockResolveNotionUserId.mockResolvedValue('notion-user-abc');
-    mockCreateNotionIssue.mockResolvedValue({
-      pageId: 'notion-page-123',
-      pageUrl: 'https://notion.so/page-123',
-    });
-
-    const ctx = makeCtx();
     await createNotionIssueStep(ctx);
 
-    expect(mockBuildRepoUrl).toHaveBeenCalledWith('owner/repo');
-    expect(mockGetSlackUserEmail).toHaveBeenCalledWith('U123');
-    expect(mockResolveNotionUserId).toHaveBeenCalledWith('user@example.com');
-    expect(mockCreateNotionIssue).toHaveBeenCalledWith({
-      title: '[CodePilot] Test Feature',
-      type: 'feature',
-      priority: 'high',
-      description: 'Test description',
-      repositoryUrl: 'https://github.com/owner/repo',
-      notionUserId: 'notion-user-abc',
-      slackPermalink: 'https://slack.com/archives/C123/p1234567890123456',
-      confidence: 0.95,
-      acceptanceCriteria: undefined,
-      conversationHistory: undefined,
-    });
-
-    expect(ctx.notionPageId).toBe('notion-page-123');
-    expect(ctx.notionPageUrl).toBe('https://notion.so/page-123');
-  });
-
-  it('should pass null notionUserId when email not found', async () => {
-    mockIsNotionConfigured.mockReturnValue(true);
-    mockBuildRepoUrl.mockReturnValue('https://github.com/owner/repo');
-    mockGetSlackUserEmail.mockResolvedValue(null);
-    mockCreateNotionIssue.mockResolvedValue({
-      pageId: 'page-1',
-      pageUrl: 'https://notion.so/page-1',
-    });
-
-    const ctx = makeCtx();
-    await createNotionIssueStep(ctx);
-
-    expect(mockCreateNotionIssue).toHaveBeenCalledWith(
-      expect.objectContaining({ notionUserId: null }),
-    );
-  });
-});
-
-describe('linkGitHubToNotion', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('should skip when notionPageId is not set', async () => {
-    const ctx = makeCtx();
-    await linkGitHubToNotion(ctx);
-    expect(mockUpdateNotionIssueWithGitHub).not.toHaveBeenCalled();
-  });
-
-  it('should skip when issueUrl is not set', async () => {
-    const ctx = makeCtx({ notionPageId: 'page-1' });
-    await linkGitHubToNotion(ctx);
-    expect(mockUpdateNotionIssueWithGitHub).not.toHaveBeenCalled();
-  });
-
-  it('should update Notion with GitHub issue URL', async () => {
-    mockUpdateNotionIssueWithGitHub.mockResolvedValue(undefined);
-    const ctx = makeCtx({
-      notionPageId: 'page-1',
-      issueUrl: 'https://github.com/owner/repo/issues/1',
-    });
-
-    await linkGitHubToNotion(ctx);
-
-    expect(mockUpdateNotionIssueWithGitHub).toHaveBeenCalledWith(
-      'page-1',
-      'https://github.com/owner/repo/issues/1',
+    const args = mockCreatePage.mock.calls[0][0];
+    expect(args.properties.Description.rich_text[0].text.content).toContain(
+      'Test description\n\nMissing Info:\n- repo name\n- acceptance criteria',
     );
   });
 
-  it('should not throw when update fails', async () => {
-    mockUpdateNotionIssueWithGitHub.mockRejectedValue(new Error('API error'));
+  it('should include acceptanceCriteria in description if present', async () => {
     const ctx = makeCtx({
-      notionPageId: 'page-1',
-      issueUrl: 'https://github.com/owner/repo/issues/1',
+      request: {
+        ...makeCtx().request,
+        acceptanceCriteria: ['AC1', 'AC2'],
+      },
     });
+    await createNotionIssueStep(ctx);
 
-    await expect(linkGitHubToNotion(ctx)).resolves.toBeUndefined();
+    const args = mockCreatePage.mock.calls[0][0];
+    expect(args.properties.Description.rich_text[0].text.content).toContain(
+      'Test description\n\nAcceptance Criteria:\n- AC1\n- AC2',
+    );
   });
 });

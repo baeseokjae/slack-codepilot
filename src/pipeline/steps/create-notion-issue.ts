@@ -1,67 +1,57 @@
 import { createLogger } from '../../lib/logger.js';
-import {
-  buildRepoUrl,
-  createNotionIssue,
-  isNotionConfigured,
-  resolveNotionUserId,
-  updateNotionIssueWithGitHub,
-} from '../../services/notion.service.js';
-import { getSlackUserEmail } from '../../services/slack-notifier.service.js';
-import { buildSlackPermalink } from './create-issue.js';
+import { config } from '../../config/index.js';
+import { NotionService } from '../../services/notion.service.js';
 import type { PipelineContext } from '../types.js';
 
-const logger = createLogger('step:create-notion-issue');
+const log = createLogger('create-notion-issue');
 
 export async function createNotionIssueStep(ctx: PipelineContext): Promise<void> {
-  if (!isNotionConfigured()) {
-    logger.info('Notion not configured, skipping step');
+  const { request, correlationId } = ctx;
+
+  if (!config.NOTION_API_KEY || !config.NOTION_ISSUE_DATABASE_ID) {
+    log.warn(
+      { correlationId },
+      'Skipping Notion issue creation: Notion API key or database ID not configured',
+    );
     return;
   }
 
-  if (!ctx.request.targetRepo) {
-    throw new Error('targetRepo is required but was null');
+  const notion = new NotionService(correlationId);
+
+  log.info({ correlationId, title: request.title }, 'Creating Notion issue');
+
+  let descriptionContent = request.description;
+  if (request.missingInfo && request.missingInfo.length > 0) {
+    descriptionContent += `\n\nMissing Info:\n${request.missingInfo.map((info) => `- ${info}`).join('\n')}`;
+  }
+  if (request.acceptanceCriteria && request.acceptanceCriteria.length > 0) {
+    descriptionContent += `\n\nAcceptance Criteria:\n${request.acceptanceCriteria.map((ac) => `- ${ac}`).join('\n')}`;
   }
 
-  const slackPermalink =
-    ctx.channelId && ctx.threadTs
-      ? buildSlackPermalink(ctx.channelId, ctx.threadTs)
-      : undefined;
-
-  let notionUserId: string | null = null;
-  try {
-    const email = await getSlackUserEmail(ctx.userId);
-    if (email) {
-      notionUserId = await resolveNotionUserId(email);
-    }
-  } catch (err) {
-    logger.warn({ err, userId: ctx.userId }, 'Failed to resolve Notion user');
-  }
-
-  const result = await createNotionIssue({
-    title: `[CodePilot] ${ctx.request.title}`,
-    type: ctx.request.type,
-    priority: ctx.request.priority,
-    description: ctx.request.description,
-    repositoryUrl: buildRepoUrl(ctx.request.targetRepo),
-    notionUserId,
-    slackPermalink,
-    confidence: ctx.request.confidence,
-    acceptanceCriteria: ctx.request.acceptanceCriteria,
-    conversationHistory: ctx.conversationHistory,
+  const page = await notion.createPage({
+    databaseId: config.NOTION_ISSUE_DATABASE_ID,
+    properties: {
+      Name: {
+        title: [{ text: { content: request.title } }],
+      },
+      Description: {
+        rich_text: [{ text: { content: descriptionContent } }],
+      },
+      Type: {
+        select: { name: request.type },
+      },
+      Priority: {
+        select: { name: request.priority },
+      },
+      Repository: request.targetRepo
+        ? { rich_text: [{ text: { content: request.targetRepo } }] }
+        : { rich_text: [] },
+      Status: {
+        select: { name: 'Backlog' }, // Default status
+      },
+    },
   });
 
-  ctx.notionPageId = result.pageId;
-  ctx.notionPageUrl = result.pageUrl;
-
-  logger.info({ notionPageId: result.pageId, notionPageUrl: result.pageUrl }, 'Notion issue created');
-}
-
-export async function linkGitHubToNotion(ctx: PipelineContext): Promise<void> {
-  if (!ctx.notionPageId || !ctx.issueUrl) return;
-
-  try {
-    await updateNotionIssueWithGitHub(ctx.notionPageId, ctx.issueUrl);
-  } catch (err) {
-    logger.warn({ err, notionPageId: ctx.notionPageId }, 'Failed to update Notion with GitHub link');
-  }
+  ctx.notionPageUrl = page.url;
+  log.info({ correlationId, notionPageUrl: page.url }, 'Notion issue created');
 }
